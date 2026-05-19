@@ -1,0 +1,10 @@
+# Environment files
+**/.env
+
+# .NET
+webapi/bin/
+webapi/obj/
+
+# Arduino
+firmware-huzzah32/build/
+firmware-huzzah32/config.h

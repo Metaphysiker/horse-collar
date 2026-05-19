@@ -1,0 +1,32 @@
+services:
+  svelte:
+    build:
+      context: ../../svelte
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8080
+    ports:
+      - "3000:80"
+    depends_on:
+      - webapi
+
+  webapi:
+    build:
+      context: ../../webapi
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - MongoDB__ConnectionString=mongodb://mongo:27017
+      - MongoDB__DatabaseName=horsecollar
+      - Cors__AllowedOrigins=http://localhost:3000
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:8
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:
