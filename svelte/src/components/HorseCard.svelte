@@ -1,10 +1,14 @@
 <script>
-  let { horse, onclick, ondelete } = $props();
+  let { horse, onclick, onarchive, onunarchive } = $props();
 </script>
 
 <div class="card" role="button" tabindex="0" onclick={onclick} onkeydown={(e) => e.key === 'Enter' && onclick()}>
   <span class="name">{horse.name}</span>
-  <button onclick={(e) => { e.stopPropagation(); ondelete(); }}>Delete</button>
+  {#if onunarchive}
+    <button onclick={(e) => { e.stopPropagation(); onunarchive(); }}>Unarchive</button>
+  {:else}
+    <button onclick={(e) => { e.stopPropagation(); if (confirm(`Archive ${horse.name}?`)) onarchive(); }}>Archive</button>
+  {/if}
 </div>
 
 <style>

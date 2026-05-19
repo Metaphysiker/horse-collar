@@ -1,5 +1,6 @@
 const baseUrl = import.meta.env.VITE_API_URL;
 
+/** @param {string} path @param {RequestInit} [options] */
 async function request(path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     headers: { 'Content-Type': 'application/json' },

@@ -1,7 +1,7 @@
 <script>
   import { formatDate } from '../utils/formatDate.js';
 
-  let { reading } = $props();
+  let { reading, ondelete } = $props();
 
   const stateColors = {
     Standing: '#22c55e',
@@ -20,6 +20,11 @@
   <td>{reading.roll?.toFixed(1)}°</td>
   <td>{reading.acceleration?.toFixed(2)} m/s²</td>
   <td>{reading.activity}</td>
+  <td>
+    <button onclick={() => { if (confirm(`Delete reading from ${formatDate(reading.timestamp)}?`)) ondelete(); }}>
+      Delete
+    </button>
+  </td>
 </tr>
 
 <style>

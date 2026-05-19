@@ -1,12 +1,14 @@
 <script>
+  // @ts-nocheck
   import { onMount } from 'svelte';
   import { push } from 'svelte-spa-router';
   import { horses } from '../services/horses.js';
   import HorseCard from '../components/HorseCard.svelte';
 
   let horseList = $state([]);
+  let archivedList = $state([]);
   let newHorseName = $state('');
-  let error = $state(null);
+  let showArchived = $state(false);
 
   onMount(async () => {
     horseList = await horses.getAll();
@@ -19,9 +21,22 @@
     newHorseName = '';
   }
 
-  async function remove(id) {
-    await horses.delete(id);
+  async function archive(id) {
+    await horses.archive(id);
     horseList = horseList.filter(h => h.id !== id);
+  }
+
+  async function toggleArchived() {
+    showArchived = !showArchived;
+    if (showArchived && archivedList.length === 0)
+      archivedList = await horses.getArchived();
+  }
+
+  async function unarchive(id) {
+    await horses.unarchive(id);
+    const horse = archivedList.find(h => h.id === id);
+    archivedList = archivedList.filter(h => h.id !== id);
+    horseList = [...horseList, { ...horse, isArchived: false }];
   }
 </script>
 
@@ -33,19 +48,36 @@
     <button type="submit">Add</button>
   </form>
 
-  {#if error}
-    <p class="error">{error}</p>
-  {/if}
-
   <div class="list">
     {#each horseList as horse (horse.id)}
       <HorseCard
         {horse}
         onclick={() => push(`/horses/${horse.id}`)}
-        ondelete={() => remove(horse.id)}
+        onarchive={() => archive(horse.id)}
       />
     {/each}
   </div>
+
+  <button class="toggle" onclick={toggleArchived}>
+    {showArchived ? 'Hide' : 'Show'} archived horses
+  </button>
+
+  {#if showArchived}
+    <h2>Archived</h2>
+    {#if archivedList.length === 0}
+      <p>No archived horses.</p>
+    {:else}
+      <div class="list">
+        {#each archivedList as horse (horse.id)}
+          <HorseCard
+            {horse}
+            onclick={() => push(`/horses/${horse.id}`)}
+            onunarchive={() => unarchive(horse.id)}
+          />
+        {/each}
+      </div>
+    {/if}
+  {/if}
 </main>
 
 <style>
@@ -54,5 +86,6 @@
   input { flex: 1; padding: 0.5rem; font-size: 1rem; }
   button { padding: 0.5rem 1rem; cursor: pointer; }
   .list { display: flex; flex-direction: column; gap: 0.75rem; }
-  .error { color: red; }
+  .toggle { margin-top: 1.5rem; }
+  h2 { margin-top: 1.5rem; }
 </style>

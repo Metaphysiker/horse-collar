@@ -40,10 +40,15 @@ public class CollarConfigController(IMongoDatabase db) : ControllerBase
     }
 
     [HttpPost("recalibrate/clear")]
-    public async Task<IActionResult> ClearRecalibrate(string horseId)
+    public async Task<IActionResult> ClearRecalibrate(string horseId, [FromBody] CalibrationResult result)
     {
-        var update = Builders<CollarConfig>.Update.Set(c => c.Recalibrate, false);
+        var update = Builders<CollarConfig>.Update
+            .Set(c => c.Recalibrate, false)
+            .Set(c => c.CalibrationStatus, result.Status)
+            .Set(c => c.CalibrationTime, DateTime.UtcNow);
         await _configs.UpdateOneAsync(c => c.HorseId == horseId, update);
         return Ok();
     }
+
+    public record CalibrationResult(string Status);
 }

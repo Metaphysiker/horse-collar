@@ -9,7 +9,11 @@ public class HorsesController(IMongoDatabase db) : ControllerBase
 
     [HttpGet]
     public async Task<List<Horse>> GetAll() =>
-        await _horses.Find(_ => true).ToListAsync();
+        await _horses.Find(h => !h.IsArchived).ToListAsync();
+
+    [HttpGet("archived")]
+    public async Task<List<Horse>> GetArchived() =>
+        await _horses.Find(h => h.IsArchived).ToListAsync();
 
     [HttpGet("{id}")]
     public async Task<ActionResult<Horse>> GetById(string id)
@@ -25,10 +29,19 @@ public class HorsesController(IMongoDatabase db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = horse.Id }, horse);
     }
 
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> Delete(string id)
+    [HttpPost("{id}/archive")]
+    public async Task<IActionResult> Archive(string id)
     {
-        var result = await _horses.DeleteOneAsync(h => h.Id == id);
-        return result.DeletedCount == 0 ? NotFound() : NoContent();
+        var update = Builders<Horse>.Update.Set(h => h.IsArchived, true);
+        var result = await _horses.UpdateOneAsync(h => h.Id == id, update);
+        return result.MatchedCount == 0 ? NotFound() : NoContent();
+    }
+
+    [HttpPost("{id}/unarchive")]
+    public async Task<IActionResult> Unarchive(string id)
+    {
+        var update = Builders<Horse>.Update.Set(h => h.IsArchived, false);
+        var result = await _horses.UpdateOneAsync(h => h.Id == id, update);
+        return result.MatchedCount == 0 ? NotFound() : NoContent();
     }
 }

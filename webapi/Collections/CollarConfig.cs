@@ -15,4 +15,6 @@ public class CollarConfig
     public int HeartbeatMs { get; set; } = 300000;
     public int SampleIntervalMs { get; set; } = 1000;
     public bool Recalibrate { get; set; } = false;
+    public string? CalibrationStatus { get; set; }
+    public DateTime? CalibrationTime { get; set; }
 }

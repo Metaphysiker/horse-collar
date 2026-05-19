@@ -6,7 +6,10 @@
 #include <time.h>
 #include "config.h"
 
-#define BATTERY_PIN A13
+#define BATTERY_PIN       A13
+#define WIFI_TIMEOUT_MS   15000  // give up connecting after 15s
+#define NTP_TIMEOUT_MS    10000  // give up NTP sync after 10s
+#define HTTP_TIMEOUT_MS   5000   // HTTP request timeout
 
 enum HorseState { Standing, LyingDown, Moving, Rolling };
 
@@ -20,8 +23,11 @@ int   heartbeatMs          = 300000;
 int   sampleIntervalMs     = 1000;
 
 // Mounting offset — set during calibration on boot
-float pitchOffset = 0.0f;
-float rollOffset  = 0.0f;
+float       pitchOffset       = 0.0f;
+float       rollOffset        = 0.0f;
+const char* calibrationResult = "unknown";
+
+bool timeSynced = false;
 
 HorseState    currentState = Standing;
 bool          isTilted     = false;
@@ -33,104 +39,74 @@ unsigned long lastSample   = 0;
 
 void setup() {
   Serial.begin(115200);
-  connectWifi();
-  syncTime();
-  fetchConfig();
-  initBno();
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  connectWifi();   // non-blocking after timeout
+  syncTime();      // skipped if no WiFi
+  fetchConfig();   // skipped if no WiFi
+  initBno();       // halts only if sensor is missing — hardware must work
   calibrate();
+}
+
+// ── WiFi ──────────────────────────────────────────────────────────────────────
+
+bool ensureWifi() {
+  if (wifiMulti.run() == WL_CONNECTED) return true;
+
+  Serial.print("Reconnecting WiFi");
+  unsigned long start = millis();
+  while (millis() - start < WIFI_TIMEOUT_MS) {
+    if (wifiMulti.run() == WL_CONNECTED) {
+      Serial.println(" connected to " + WiFi.SSID());
+      return true;
+    }
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println(" failed — continuing offline");
+  return false;
 }
 
 void connectWifi() {
   struct { const char* ssid; const char* password; } networks[] = WIFI_NETWORKS;
   for (auto& n : networks) wifiMulti.addAP(n.ssid, n.password);
-
-  Serial.print("Connecting to WiFi");
-  while (wifiMulti.run() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println(" connected to " + WiFi.SSID());
+  ensureWifi();
 }
+
+// ── Time ──────────────────────────────────────────────────────────────────────
 
 void syncTime() {
+  if (!ensureWifi()) return;
+
   configTime(TZ_OFFSET, 0, NTP_SERVER);
   Serial.print("Syncing time");
+
+  unsigned long start = millis();
   time_t now = 0;
-  while (now < 100000) {
+  while (millis() - start < NTP_TIMEOUT_MS) {
+    time(&now);
+    if (now > 100000) {
+      timeSynced = true;
+      Serial.println(" done");
+      return;
+    }
     delay(500);
     Serial.print(".");
-    time(&now);
   }
-  Serial.println(" done");
+  Serial.println(" failed — timestamps will be inaccurate");
 }
+
+// ── BNO085 ────────────────────────────────────────────────────────────────────
 
 void initBno() {
   if (!bno.begin_I2C()) {
     Serial.println("BNO085 not found — check wiring");
-    while (1) delay(100);
+    while (1) delay(100);  // sensor is required, cannot run without it
   }
   bno.enableReport(SH2_ROTATION_VECTOR);
   bno.enableReport(SH2_LINEAR_ACCELERATION);
   Serial.println("BNO085 ready");
 }
-
-void calibrate() {
-  Serial.println("Calibrating — keep horse still for 10 seconds");
-  pinMode(LED_BUILTIN, OUTPUT);
-
-  // Blink LED while waiting so you know it's calibrating
-  for (int i = 0; i < 10; i++) {
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(500);
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(500);
-  }
-
-  float pitch = 0, roll = 0, acceleration = 0;
-  String activity;
-  readBno(pitch, roll, acceleration, activity);
-
-  // If horse was moving during calibration window, offsets stay 0
-  if (acceleration < 0.3f) {
-    pitchOffset = pitch;
-    rollOffset  = roll;
-    Serial.printf("Calibrated — pitch offset: %.1f, roll offset: %.1f\n", pitchOffset, rollOffset);
-  } else {
-    Serial.println("Movement detected during calibration — using zero offsets");
-  }
-
-  digitalWrite(LED_BUILTIN, HIGH); // steady on = monitoring started
-}
-
-// ── Loop ──────────────────────────────────────────────────────────────────────
-
-void loop() {
-  if (millis() - lastSample < (unsigned long)sampleIntervalMs) return;
-  lastSample = millis();
-
-  float pitch = 0, roll = 0, acceleration = 0;
-  String activity = "stable";
-  readBno(pitch, roll, acceleration, activity);
-
-  HorseState newState = detectState(pitch, roll, acceleration);
-
-  bool stateChanged = newState != currentState;
-  bool heartbeat    = millis() - lastSend >= (unsigned long)heartbeatMs;
-
-  if (stateChanged || heartbeat) {
-    currentState = newState;
-    lastSend     = millis();
-
-    float voltage = readBatteryVoltage();
-    int   percent = voltageToPercent(voltage);
-
-    sendReading(pitch, roll, acceleration, activity, newState);
-    sendDeviceStatus(voltage, percent);
-    fetchConfig();
-  }
-}
-
-// ── BNO085 ────────────────────────────────────────────────────────────────────
 
 void readBno(float &pitch, float &roll, float &acceleration, String &activity) {
   sh2_SensorValue_t event;
@@ -152,6 +128,35 @@ void readBno(float &pitch, float &roll, float &acceleration, String &activity) {
 void computePitchRoll(sh2_RotationVectorWAcc_t q, float &pitch, float &roll) {
   pitch = atan2(2*(q.real*q.i + q.j*q.k), 1 - 2*(q.i*q.i + q.j*q.j)) * 180.0f / PI;
   roll  = asin (2*(q.real*q.j - q.k*q.i)) * 180.0f / PI;
+}
+
+// ── Calibration ───────────────────────────────────────────────────────────────
+
+void calibrate() {
+  Serial.println("Calibrating — keep horse still for 10 seconds");
+
+  for (int i = 0; i < 10; i++) {
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(500);
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(500);
+  }
+
+  float pitch = 0, roll = 0, acceleration = 0;
+  String activity;
+  readBno(pitch, roll, acceleration, activity);
+
+  if (acceleration < 0.3f) {
+    pitchOffset = pitch;
+    rollOffset  = roll;
+    Serial.printf("Calibrated — pitch offset: %.1f, roll offset: %.1f\n", pitchOffset, rollOffset);
+    calibrationResult = "success";
+  } else {
+    Serial.println("Movement detected during calibration — using zero offsets");
+    calibrationResult = "failed_movement";
+  }
+
+  digitalWrite(LED_BUILTIN, HIGH);
 }
 
 // ── State detection ───────────────────────────────────────────────────────────
@@ -192,40 +197,6 @@ int voltageToPercent(float v) {
   return 0;
 }
 
-// ── Config ────────────────────────────────────────────────────────────────────
-
-void clearRecalibrate() {
-  HTTPClient http;
-  http.begin(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/recalibrate/clear");
-  http.POST("");
-  http.end();
-}
-
-void fetchConfig() {
-  if (wifiMulti.run() != WL_CONNECTED) return;
-
-  HTTPClient http;
-  http.begin(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config");
-  int code = http.GET();
-
-  if (code == 200) {
-    JsonDocument doc;
-    deserializeJson(doc, http.getString());
-    tiltThresholdDegrees = doc["tiltThresholdDegrees"] | tiltThresholdDegrees;
-    lyingConfirmMs       = doc["lyingConfirmMs"]       | lyingConfirmMs;
-    heartbeatMs          = doc["heartbeatMs"]          | heartbeatMs;
-    sampleIntervalMs     = doc["sampleIntervalMs"]     | sampleIntervalMs;
-    Serial.println("Config updated");
-
-    if (doc["recalibrate"] | false) {
-      calibrate();
-      clearRecalibrate();
-    }
-  }
-
-  http.end();
-}
-
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
 String isoTimestamp() {
@@ -245,6 +216,65 @@ const char* stateToString(HorseState state) {
     default:        return "Standing";
   }
 }
+
+bool post(String url, String body) {
+  if (!ensureWifi()) return false;
+
+  HTTPClient http;
+  http.begin(url);
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.addHeader("Content-Type", "application/json");
+  int code = http.POST(body);
+  http.end();
+
+  if (code < 0) {
+    Serial.println("POST failed: " + http.errorToString(code));
+    return false;
+  }
+  return true;
+}
+
+// ── Config ────────────────────────────────────────────────────────────────────
+
+void clearRecalibrate(const char* status) {
+  if (!ensureWifi()) return;
+
+  JsonDocument doc;
+  doc["status"] = status;
+  String body;
+  serializeJson(doc, body);
+  post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/recalibrate/clear", body);
+}
+
+void fetchConfig() {
+  if (!ensureWifi()) return;
+
+  HTTPClient http;
+  http.begin(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config");
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  int code = http.GET();
+
+  if (code == 200) {
+    JsonDocument doc;
+    deserializeJson(doc, http.getString());
+    tiltThresholdDegrees = doc["tiltThresholdDegrees"] | tiltThresholdDegrees;
+    lyingConfirmMs       = doc["lyingConfirmMs"]       | lyingConfirmMs;
+    heartbeatMs          = doc["heartbeatMs"]          | heartbeatMs;
+    sampleIntervalMs     = doc["sampleIntervalMs"]     | sampleIntervalMs;
+    Serial.println("Config updated");
+
+    if (doc["recalibrate"] | false) {
+      calibrate();
+      clearRecalibrate(calibrationResult);
+    }
+  } else if (code < 0) {
+    Serial.println("Config fetch failed: " + http.errorToString(code));
+  }
+
+  http.end();
+}
+
+// ── Sending ───────────────────────────────────────────────────────────────────
 
 void sendReading(float pitch, float roll, float acceleration, String activity, HorseState state) {
   JsonDocument doc;
@@ -271,13 +301,33 @@ void sendDeviceStatus(float voltage, int percent) {
   post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/status", body);
 }
 
-void post(String url, String body) {
-  if (wifiMulti.run() != WL_CONNECTED) return;
+// ── Loop ──────────────────────────────────────────────────────────────────────
 
-  HTTPClient http;
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  int code = http.POST(body);
-  if (code < 0) Serial.println("POST failed: " + http.errorToString(code));
-  http.end();
+void loop() {
+  if (millis() - lastSample < (unsigned long)sampleIntervalMs) return;
+  lastSample = millis();
+
+  // Retry time sync if it failed at boot
+  if (!timeSynced) syncTime();
+
+  float pitch = 0, roll = 0, acceleration = 0;
+  String activity = "stable";
+  readBno(pitch, roll, acceleration, activity);
+
+  HorseState newState = detectState(pitch, roll, acceleration);
+
+  bool stateChanged = newState != currentState;
+  bool heartbeat    = millis() - lastSend >= (unsigned long)heartbeatMs;
+
+  if (stateChanged || heartbeat) {
+    currentState = newState;
+    lastSend     = millis();
+
+    float voltage = readBatteryVoltage();
+    int   percent = voltageToPercent(voltage);
+
+    sendReading(pitch, roll, acceleration, activity, newState);
+    sendDeviceStatus(voltage, percent);
+    fetchConfig();
+  }
 }
