@@ -1,0 +1,14 @@
+services:
+  webapi:
+    build:
+      context: ../../webapi
+      dockerfile: Dockerfile
+    image: horse-collar-webapi
+
+  svelte:
+    build:
+      context: ../../svelte
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${API_URL}
+    image: horse-collar-svelte
