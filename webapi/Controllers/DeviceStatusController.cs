@@ -3,7 +3,7 @@ using MongoDB.Driver;
 
 [ApiController]
 [Route("horses/{horseId}/status")]
-public class DeviceStatusController(IMongoDatabase db) : ControllerBase
+public class DeviceStatusController(IMongoDatabase db, HorseService horseService) : ControllerBase
 {
     private readonly IMongoCollection<DeviceStatus> _status = db.GetCollection<DeviceStatus>("deviceStatus");
 
@@ -21,6 +21,7 @@ public class DeviceStatusController(IMongoDatabase db) : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create(string horseId, DeviceStatus status)
     {
+        await horseService.EnsureExistsAsync(horseId);
         status.HorseId = horseId;
         await _status.InsertOneAsync(status);
         return Created();

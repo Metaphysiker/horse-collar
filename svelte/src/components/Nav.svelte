@@ -20,6 +20,7 @@
   <span class="brand">🐴 Horse Collar</span>
   <a href="/" use:link>Horses</a>
   {#if horseId()}
+    <a href="/horses/{horseId()}/config" use:link>Config</a>
     <a href="/horses/{horseId()}/actions" use:link>Calibrate</a>
   {/if}
 </nav>

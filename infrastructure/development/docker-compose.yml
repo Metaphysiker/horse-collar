@@ -7,6 +7,8 @@ services:
         VITE_API_URL: http://localhost:8080
     ports:
       - "3000:80"
+    init: true
+    stop_grace_period: 5s
     depends_on:
       - webapi
 
@@ -16,6 +18,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
+    init: true
+    stop_grace_period: 5s
     environment:
       - MongoDB__ConnectionString=mongodb://mongo:27017
       - MongoDB__DatabaseName=horsecollar
@@ -25,6 +29,8 @@ services:
 
   mongo:
     image: mongo:8
+    init: true
+    stop_grace_period: 10s
     volumes:
       - mongo-data:/data/db
 

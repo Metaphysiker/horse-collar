@@ -4,11 +4,14 @@
   import { pop, push } from 'svelte-spa-router';
   import { horses } from '../services/horses.js';
   import { sensorReadings } from '../services/sensorReadings.js';
+  import { deviceStatus } from '../services/deviceStatus.js';
   import SensorReadingRow from '../components/SensorReadingRow.svelte';
+  import { formatDate, formatDateOnly } from '../utils/formatDate.js';
 
   let { params = {} } = $props();
 
   let horse = $state(null);
+  let status = $state(null);
   let readings = $state([]);
   let selectedDate = $state(todayString());
 
@@ -17,7 +20,10 @@
   }
 
   onMount(async () => {
-    horse = await horses.getById(params.id);
+    [horse, status] = await Promise.all([
+      horses.getById(params.id),
+      deviceStatus.getLatest(params.id).catch(() => null),
+    ]);
     await loadReadings();
   });
 
@@ -39,16 +45,31 @@
       <h1>{horse.name}</h1>
       <button onclick={() => push(`/horses/${params.id}/actions`)}>Device Actions</button>
     </div>
+    <div class="device-status">
+      <span class="status-label">Battery</span>
+      {#if status}
+        <span class="battery-bar">
+          <span class="battery-fill" style="width: {status.batteryPercent}%; background: {status.batteryPercent < 20 ? '#ef4444' : status.batteryPercent < 50 ? '#f59e0b' : '#22c55e'}"></span>
+        </span>
+        <span class="battery-text">{status.batteryPercent}% &nbsp;·&nbsp; {status.batteryVoltage.toFixed(2)} V</span>
+        <span class="status-time">Last seen: {formatDate(status.timestamp)}</span>
+      {:else}
+        <span class="no-device">No device data available yet</span>
+      {/if}
+    </div>
   {/if}
 
   <div class="toolbar">
     <h2>Sensor Readings</h2>
-    <input
-      type="date"
-      bind:value={selectedDate}
-      onchange={loadReadings}
-      max={todayString()}
-    />
+    <div class="date-picker">
+      <span>{formatDateOnly(selectedDate)}</span>
+      <input
+        type="date"
+        bind:value={selectedDate}
+        onchange={loadReadings}
+        max={todayString()}
+      />
+    </div>
   </div>
 
   {#if readings.length === 0}
@@ -79,8 +100,21 @@
   main { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
   button { margin-bottom: 1rem; cursor: pointer; }
   .header { display: flex; align-items: center; justify-content: space-between; }
+  .device-status {
+    display: flex; align-items: center; gap: 0.75rem;
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.5rem;
+    padding: 0.5rem 1rem; margin-bottom: 1.25rem; font-size: 0.9rem;
+  }
+  .status-label { font-weight: 600; color: #475569; }
+  .battery-bar { width: 80px; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; }
+  .battery-fill { display: block; height: 100%; border-radius: 6px; transition: width 0.3s; }
+  .battery-text { color: #1e293b; font-weight: 500; }
+  .status-time { margin-left: auto; color: #94a3b8; font-size: 0.82rem; }
+  .no-device { color: #94a3b8; font-style: italic; }
   .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
   .toolbar h2 { margin: 0; }
+  .date-picker { display: flex; align-items: center; gap: 0.5rem; }
+  .date-picker span { font-size: 0.95rem; color: #475569; }
   input[type="date"] { padding: 0.4rem 0.6rem; font-size: 1rem; }
   table { width: 100%; border-collapse: collapse; }
   th, :global(td) { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }

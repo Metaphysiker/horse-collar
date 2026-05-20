@@ -3,7 +3,7 @@ using MongoDB.Driver;
 
 [ApiController]
 [Route("horses/{horseId}/readings")]
-public class SensorReadingsController(IMongoDatabase db) : ControllerBase
+public class SensorReadingsController(IMongoDatabase db, HorseService horseService) : ControllerBase
 {
     private readonly IMongoCollection<SensorReading> _readings = db.GetCollection<SensorReading>("sensorReadings");
 
@@ -22,6 +22,7 @@ public class SensorReadingsController(IMongoDatabase db) : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create(string horseId, SensorReading reading)
     {
+        await horseService.EnsureExistsAsync(horseId);
         reading.HorseId = horseId;
         await _readings.InsertOneAsync(reading);
         return Created();
@@ -30,6 +31,7 @@ public class SensorReadingsController(IMongoDatabase db) : ControllerBase
     [HttpPost("batch")]
     public async Task<IActionResult> CreateBatch(string horseId, [FromBody] List<SensorReading> readings)
     {
+        await horseService.EnsureExistsAsync(horseId);
         readings.ForEach(r => r.HorseId = horseId);
         await _readings.InsertManyAsync(readings);
         return Created();

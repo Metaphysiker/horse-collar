@@ -51,6 +51,7 @@ void setup() {
 // ── WiFi ──────────────────────────────────────────────────────────────────────
 
 bool ensureWifi() {
+  if (WiFi.getMode() == WIFI_OFF) WiFi.mode(WIFI_STA);
   if (wifiMulti.run() == WL_CONNECTED) return true;
 
   Serial.print("Reconnecting WiFi");
@@ -65,6 +66,12 @@ bool ensureWifi() {
   }
   Serial.println(" failed — continuing offline");
   return false;
+}
+
+void disconnectWifi() {
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  Serial.println("WiFi off");
 }
 
 void connectWifi() {
@@ -329,5 +336,6 @@ void loop() {
     sendReading(pitch, roll, acceleration, activity, newState);
     sendDeviceStatus(voltage, percent);
     fetchConfig();
+    disconnectWifi();
   }
 }

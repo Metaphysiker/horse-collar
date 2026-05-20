@@ -10,7 +10,7 @@
     Rolling:  '#ef4444',
   };
 
-  const color = stateColors[reading.state] ?? '#888';
+  const color = $derived(stateColors[reading.state] ?? '#888');
 </script>
 
 <tr>

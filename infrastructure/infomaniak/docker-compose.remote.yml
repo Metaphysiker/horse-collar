@@ -6,6 +6,8 @@ services:
     depends_on:
       - webapi
     restart: unless-stopped
+    init: true
+    stop_grace_period: 5s
     deploy:
       resources:
         limits:
@@ -23,6 +25,8 @@ services:
     depends_on:
       - mongo
     restart: unless-stopped
+    init: true
+    stop_grace_period: 5s
     deploy:
       resources:
         limits:
@@ -37,6 +41,8 @@ services:
     volumes:
       - mongo-data:/data/db
     restart: unless-stopped
+    init: true
+    stop_grace_period: 10s
     deploy:
       resources:
         limits:

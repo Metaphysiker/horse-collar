@@ -15,6 +15,7 @@ var mongoConnectionString = builder.Configuration["MongoDB:ConnectionString"]!;
 var mongoDatabaseName = builder.Configuration["MongoDB:DatabaseName"]!;
 builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoConnectionString));
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoClient>().GetDatabase(mongoDatabaseName));
+builder.Services.AddScoped<HorseService>();
 
 var app = builder.Build();
 
