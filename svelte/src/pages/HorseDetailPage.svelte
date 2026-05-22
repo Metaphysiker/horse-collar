@@ -1,17 +1,20 @@
 <script>
   // @ts-nocheck
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { pop, push } from 'svelte-spa-router';
   import { horses } from '../services/horses.js';
   import { sensorReadings } from '../services/sensorReadings.js';
   import { deviceStatus } from '../services/deviceStatus.js';
   import SensorReadingRow from '../components/SensorReadingRow.svelte';
+  import OrientationViewer from '../components/OrientationViewer.svelte';
   import { formatDate, formatDateOnly } from '../utils/formatDate.js';
+  import { collarConfig } from '../services/collarConfig.js';
 
   let { params = {} } = $props();
 
   let horse = $state(null);
   let status = $state(null);
+  let config = $state(null);
   let readings = $state([]);
   let selectedDate = $state(todayString());
 
@@ -19,13 +22,27 @@
     return new Date().toISOString().slice(0, 10);
   }
 
+  let refreshInterval;
+
   onMount(async () => {
-    [horse, status] = await Promise.all([
+    [horse, status, config] = await Promise.all([
       horses.getById(params.id),
       deviceStatus.getLatest(params.id).catch(() => null),
+      collarConfig.get(params.id).catch(() => null),
     ]);
     await loadReadings();
+    refreshInterval = setInterval(async () => {
+      if (selectedDate === todayString()) {
+        [status, config] = await Promise.all([
+          deviceStatus.getLatest(params.id).catch(() => status),
+          collarConfig.get(params.id).catch(() => config),
+        ]);
+        await loadReadings();
+      }
+    }, 5000);
   });
+
+  onDestroy(() => clearInterval(refreshInterval));
 
   async function loadReadings() {
     readings = await sensorReadings.getByHorse(params.id, selectedDate);
@@ -35,6 +52,7 @@
     await sensorReadings.delete(params.id, id);
     readings = readings.filter(r => r.id !== id);
   }
+
 </script>
 
 <main>
@@ -59,6 +77,21 @@
     </div>
   {/if}
 
+  {#if readings.length > 0}
+    {@const latest = readings.at(-1)}
+    <div class="orientation-card">
+      <OrientationViewer
+        pitch={latest.pitch ?? 0}
+        roll={latest.roll ?? 0}
+        pitchRef={status?.pitchRef ?? 0}
+        rollRef={status?.rollRef ?? 0}
+        threshold={config?.tiltThresholdDegrees ?? 60}
+        tiltDeg={latest.tiltDeg ?? null}
+      />
+
+    </div>
+  {/if}
+
   <div class="toolbar">
     <h2>Sensor Readings</h2>
     <div class="date-picker">
@@ -72,7 +105,7 @@
     </div>
   </div>
 
-  {#if readings.length === 0}
+{#if readings.length === 0}
     <p>No readings for this day.</p>
   {:else}
     <table>
@@ -88,7 +121,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each readings as reading (reading.id)}
+        {#each [...readings].reverse() as reading (reading.id)}
           <SensorReadingRow {reading} ondelete={() => remove(reading.id)} />
         {/each}
       </tbody>
@@ -116,7 +149,8 @@
   .date-picker { display: flex; align-items: center; gap: 0.5rem; }
   .date-picker span { font-size: 0.95rem; color: #475569; }
   input[type="date"] { padding: 0.4rem 0.6rem; font-size: 1rem; }
-  table { width: 100%; border-collapse: collapse; }
+  .orientation-card { margin-bottom: 1.25rem; }
+table { width: 100%; border-collapse: collapse; }
   th, :global(td) { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }
   th { font-weight: 600; }
 </style>

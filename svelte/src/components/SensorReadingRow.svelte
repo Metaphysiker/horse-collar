@@ -1,4 +1,5 @@
 <script>
+  import { fly } from 'svelte/transition';
   import { formatDate } from '../utils/formatDate.js';
 
   let { reading, ondelete } = $props();
@@ -13,7 +14,7 @@
   const color = $derived(stateColors[reading.state] ?? '#888');
 </script>
 
-<tr>
+<tr in:fly={{ y: -16, duration: 250 }}>
   <td>{formatDate(reading.timestamp)}</td>
   <td><span class="badge" style="background:{color}">{reading.state}</span></td>
   <td>{reading.pitch?.toFixed(1)}°</td>

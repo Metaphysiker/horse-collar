@@ -17,4 +17,5 @@ public class CollarConfig
     public bool Recalibrate { get; set; } = false;
     public string? CalibrationStatus { get; set; }
     public DateTime? CalibrationTime { get; set; }
+    public bool Reboot { get; set; } = false;
 }

@@ -10,4 +10,7 @@ export const collarConfig = {
 
   triggerRecalibrate: (horseId) =>
     request(`/horses/${horseId}/config/recalibrate`, { method: 'POST' }),
+
+  triggerReboot: (horseId) =>
+    request(`/horses/${horseId}/config/reboot`, { method: 'POST' }),
 };

@@ -14,10 +14,17 @@
   let lastReading     = $state(null);
   let status          = $state(null);
   let loading         = $state(false);
+  let rebootStatus    = $state(null);
   let calibCountdown  = $state(null);
   let heartbeatSecs   = $state(null);
   let tickInterval    = null;
   let pollInterval    = null;
+
+  async function refreshLastReading() {
+    const today = new Date().toISOString().slice(0, 10);
+    const readings = await sensorReadings.getByHorse(params.id, today);
+    lastReading = readings.at(-1) ?? null;
+  }
 
   onMount(async () => {
     [horse, config] = await Promise.all([
@@ -25,11 +32,14 @@
       collarConfig.get(params.id),
     ]);
 
-    const today = new Date().toISOString().slice(0, 10);
-    const readings = await sensorReadings.getByHorse(params.id, today);
-    lastReading = readings.at(-1) ?? null;
-
+    await refreshLastReading();
     startHeartbeatTick();
+
+    tickInterval = setInterval(() => {
+      refreshLastReading();
+      updateHeartbeatCountdown();
+      if (calibCountdown !== null && calibCountdown > 0) calibCountdown -= 1;
+    }, 5000);
   });
 
   onDestroy(() => {
@@ -38,11 +48,6 @@
   });
 
   function startHeartbeatTick() {
-    clearInterval(tickInterval);
-    tickInterval = setInterval(() => {
-      updateHeartbeatCountdown();
-      if (calibCountdown !== null && calibCountdown > 0) calibCountdown -= 1;
-    }, 1000);
     updateHeartbeatCountdown();
   }
 
@@ -89,6 +94,20 @@
     }, 10000);
   }
 
+  async function triggerReboot() {
+    if (!confirm('The collar will restart on the next heartbeat. Continue?')) return;
+    loading = true;
+    rebootStatus = null;
+    try {
+      await collarConfig.triggerReboot(params.id);
+      rebootStatus = { ok: true };
+    } catch {
+      rebootStatus = { ok: false };
+    } finally {
+      loading = false;
+    }
+  }
+
   function fmt(seconds) {
     if (seconds === null) return '--:--';
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -114,6 +133,23 @@
       {/if}
     {:else}
       <p>No readings today — collar has not checked in yet.</p>
+    {/if}
+  </section>
+
+  <section>
+    <h2>Reboot Device</h2>
+    <p>
+      Forces the collar to restart on its next heartbeat. Use this if readings appear frozen or stuck.
+    </p>
+    <button class="action danger" onclick={triggerReboot} disabled={loading}>
+      {loading ? 'Scheduling...' : 'Reboot Collar'}
+    </button>
+    {#if rebootStatus}
+      {#if rebootStatus.ok}
+        <div class="status ok">Reboot scheduled — collar will restart on next heartbeat.</div>
+      {:else}
+        <div class="status error">Failed to schedule reboot. Check if the server is reachable.</div>
+      {/if}
     {/if}
   </section>
 
@@ -154,6 +190,7 @@
   .big-timer { font-size: 3rem; font-weight: 700; margin: 0.25rem 0; }
   .overdue { color: #991b1b; font-weight: 600; }
   .action { background: #3b82f6; color: white; border: none; border-radius: 4px; padding: 0.6rem 1.2rem; font-size: 1rem; }
+  .action.danger { background: #dc2626; }
   .action:disabled { opacity: 0.6; cursor: not-allowed; }
   .status { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
   .ok    { background: #dcfce7; color: #166534; }

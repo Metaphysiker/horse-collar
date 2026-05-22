@@ -14,6 +14,7 @@ public class SensorReading
 
     public float Pitch { get; set; }
     public float Roll { get; set; }
+    public float TiltDeg { get; set; }
     public float Acceleration { get; set; }
     public string Activity { get; set; } = string.Empty;
     public HorseState State { get; set; }

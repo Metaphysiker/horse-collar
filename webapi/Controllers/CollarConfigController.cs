@@ -36,7 +36,7 @@ public class CollarConfigController(IMongoDatabase db) : ControllerBase
     {
         var update = Builders<CollarConfig>.Update.Set(c => c.Recalibrate, true);
         await _configs.UpdateOneAsync(c => c.HorseId == horseId, update, new UpdateOptions { IsUpsert = true });
-        return Ok();
+        return NoContent();
     }
 
     [HttpPost("recalibrate/clear")]
@@ -47,7 +47,23 @@ public class CollarConfigController(IMongoDatabase db) : ControllerBase
             .Set(c => c.CalibrationStatus, result.Status)
             .Set(c => c.CalibrationTime, DateTime.UtcNow);
         await _configs.UpdateOneAsync(c => c.HorseId == horseId, update);
-        return Ok();
+        return NoContent();
+    }
+
+    [HttpPost("reboot")]
+    public async Task<IActionResult> Reboot(string horseId)
+    {
+        var update = Builders<CollarConfig>.Update.Set(c => c.Reboot, true);
+        await _configs.UpdateOneAsync(c => c.HorseId == horseId, update, new UpdateOptions { IsUpsert = true });
+        return NoContent();
+    }
+
+    [HttpPost("reboot/clear")]
+    public async Task<IActionResult> ClearReboot(string horseId)
+    {
+        var update = Builders<CollarConfig>.Update.Set(c => c.Reboot, false);
+        await _configs.UpdateOneAsync(c => c.HorseId == horseId, update);
+        return NoContent();
     }
 
     public record CalibrationResult(string Status);

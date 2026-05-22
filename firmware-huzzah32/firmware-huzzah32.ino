@@ -22,9 +22,9 @@ int   lyingConfirmMs       = 10000;
 int   heartbeatMs          = 300000;
 int   sampleIntervalMs     = 1000;
 
-// Mounting offset — set during calibration on boot
-float       pitchOffset       = 0.0f;
-float       rollOffset        = 0.0f;
+// Reference orientation — stored during calibration
+float       refQw = 1.0f, refQx = 0.0f, refQy = 0.0f, refQz = 0.0f;
+float       curQw = 1.0f, curQx = 0.0f, curQy = 0.0f, curQz = 0.0f;
 const char* calibrationResult = "unknown";
 
 bool timeSynced = false;
@@ -35,6 +35,11 @@ unsigned long tiltStart    = 0;
 unsigned long lastSend     = 0;
 unsigned long lastSample   = 0;
 
+float   lastPitch        = 0;
+float   lastRoll         = 0;
+float   lastAcceleration = 0;
+String  lastActivity     = "stable";
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 void setup() {
@@ -43,8 +48,8 @@ void setup() {
 
   connectWifi();   // non-blocking after timeout
   syncTime();      // skipped if no WiFi
+  initBno();       // must be before fetchConfig — fetchConfig may trigger calibrate()
   fetchConfig();   // skipped if no WiFi
-  initBno();       // halts only if sensor is missing — hardware must work
   calibrate();
 }
 
@@ -118,8 +123,14 @@ void initBno() {
 void readBno(float &pitch, float &roll, float &acceleration, String &activity) {
   sh2_SensorValue_t event;
   while (bno.getSensorEvent(&event)) {
-    if (event.sensorId == SH2_ROTATION_VECTOR)
+    if (event.sensorId == SH2_ROTATION_VECTOR) {
+      curQw = event.un.rotationVector.real;
+      curQx = event.un.rotationVector.i;
+      curQy = event.un.rotationVector.j;
+      curQz = event.un.rotationVector.k;
       computePitchRoll(event.un.rotationVector, pitch, roll);
+    }
+
 
     if (event.sensorId == SH2_LINEAR_ACCELERATION) {
       acceleration = sqrt(
@@ -154,12 +165,11 @@ void calibrate() {
   readBno(pitch, roll, acceleration, activity);
 
   if (acceleration < 0.3f) {
-    pitchOffset = pitch;
-    rollOffset  = roll;
-    Serial.printf("Calibrated — pitch offset: %.1f, roll offset: %.1f\n", pitchOffset, rollOffset);
+    refQw = curQw; refQx = curQx; refQy = curQy; refQz = curQz;
+    Serial.printf("Calibrated — reference stored (pitch: %.1f, roll: %.1f)\n", pitch, roll);
     calibrationResult = "success";
   } else {
-    Serial.println("Movement detected during calibration — using zero offsets");
+    Serial.println("Movement detected during calibration — keeping previous reference");
     calibrationResult = "failed_movement";
   }
 
@@ -168,9 +178,15 @@ void calibrate() {
 
 // ── State detection ───────────────────────────────────────────────────────────
 
+float tiltAngleDeg() {
+  float dot = refQw*curQw + refQx*curQx + refQy*curQy + refQz*curQz;
+  if (dot < 0) dot = -dot;
+  if (dot > 1.0f) dot = 1.0f;
+  return 2.0f * acos(dot) * 180.0f / PI;
+}
+
 HorseState detectState(float pitch, float roll, float acceleration) {
-  bool tilted = abs(pitch - pitchOffset) > tiltThresholdDegrees
-             || abs(roll  - rollOffset)  > tiltThresholdDegrees;
+  bool tilted = tiltAngleDeg() > tiltThresholdDegrees;
   bool moving = acceleration > 0.5f;
 
   if (tilted && moving) {
@@ -274,6 +290,12 @@ void fetchConfig() {
       calibrate();
       clearRecalibrate(calibrationResult);
     }
+    if (doc["reboot"] | false) {
+      post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/reboot/clear", "{}");
+      Serial.println("Remote reboot triggered");
+      delay(500);
+      ESP.restart();
+    }
   } else if (code < 0) {
     Serial.println("Config fetch failed: " + http.errorToString(code));
   }
@@ -288,6 +310,7 @@ void sendReading(float pitch, float roll, float acceleration, String activity, H
   doc["timestamp"]    = isoTimestamp();
   doc["pitch"]        = pitch;
   doc["roll"]         = roll;
+  doc["tiltDeg"]      = tiltAngleDeg();
   doc["acceleration"] = acceleration;
   doc["activity"]     = activity;
   doc["state"]        = stateToString(state);
@@ -298,10 +321,15 @@ void sendReading(float pitch, float roll, float acceleration, String activity, H
 }
 
 void sendDeviceStatus(float voltage, int percent) {
+  float refPitch = atan2(2*(refQw*refQx + refQy*refQz), 1 - 2*(refQx*refQx + refQy*refQy)) * 180.0f / PI;
+  float refRoll  = asin(constrain(2*(refQw*refQy - refQz*refQx), -1.0f, 1.0f)) * 180.0f / PI;
+
   JsonDocument doc;
   doc["timestamp"]      = isoTimestamp();
   doc["batteryVoltage"] = voltage;
   doc["batteryPercent"] = percent;
+  doc["pitchRef"]       = refPitch;
+  doc["rollRef"]        = refRoll;
 
   String body;
   serializeJson(doc, body);
@@ -317,11 +345,12 @@ void loop() {
   // Retry time sync if it failed at boot
   if (!timeSynced) syncTime();
 
-  float pitch = 0, roll = 0, acceleration = 0;
-  String activity = "stable";
-  readBno(pitch, roll, acceleration, activity);
+  readBno(lastPitch, lastRoll, lastAcceleration, lastActivity);
 
-  HorseState newState = detectState(pitch, roll, acceleration);
+  Serial.printf("pitch: %6.1f  roll: %6.1f  accel: %.2f  tilt: %5.1f°  state: %s\n",
+    lastPitch, lastRoll, lastAcceleration, tiltAngleDeg(), stateToString(detectState(lastPitch, lastRoll, lastAcceleration)));
+
+  HorseState newState = detectState(lastPitch, lastRoll, lastAcceleration);
 
   bool stateChanged = newState != currentState;
   bool heartbeat    = millis() - lastSend >= (unsigned long)heartbeatMs;
@@ -333,7 +362,7 @@ void loop() {
     float voltage = readBatteryVoltage();
     int   percent = voltageToPercent(voltage);
 
-    sendReading(pitch, roll, acceleration, activity, newState);
+    sendReading(lastPitch, lastRoll, lastAcceleration, lastActivity, newState);
     sendDeviceStatus(voltage, percent);
     fetchConfig();
     disconnectWifi();
