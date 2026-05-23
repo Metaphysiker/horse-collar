@@ -6,14 +6,15 @@
 #include <time.h>
 #include "config.h"
 
-#define BATTERY_PIN      A13
-#define SLEEP_SECONDS    30
-#define SLEEP_US         (SLEEP_SECONDS * 1000000ULL)
-#define WIFI_TIMEOUT_MS  15000
-#define NTP_TIMEOUT_MS   10000
-#define HTTP_TIMEOUT_MS  5000
+#define BATTERY_PIN       A13
+#define SLEEP_NORMAL_S    30    // idle / standing / moving
+#define SLEEP_ALERT_S     15    // lying too long — check more often
+#define SLEEP_EMERGENCY_S 10    // critical — check as fast as possible
+#define WIFI_TIMEOUT_MS   15000
+#define NTP_TIMEOUT_MS    10000
+#define HTTP_TIMEOUT_MS   5000
 
-enum HorseState { Standing, LyingDown, Moving, Rolling };
+enum HorseState { Standing, LyingDown, Moving, Rolling, Alert, Emergency };
 
 // ── RTC memory — survives deep sleep ──────────────────────────────────────────
 
@@ -21,14 +22,17 @@ RTC_DATA_ATTR bool       firstBoot            = true;
 RTC_DATA_ATTR float      refQw = 1, refQx = 0, refQy = 0, refQz = 0;
 RTC_DATA_ATTR HorseState currentState         = Standing;
 RTC_DATA_ATTR int        tiltCycles           = 0;   // consecutive cycles tilted
+RTC_DATA_ATTR int        lyingCycles          = 0;   // total cycles in lying/alert/emergency
 RTC_DATA_ATTR int        cyclesSinceLastSend  = 0;
 RTC_DATA_ATTR bool       timeSynced           = false;
 RTC_DATA_ATTR const char* calibrationResult   = "unknown";
 
 // Config — stored in RTC so firmware doesn't need to fetch every wake
 RTC_DATA_ATTR float tiltThresholdDegrees = 60.0f;
-RTC_DATA_ATTR int   lyingConfirmCycles   = 1;    // recomputed from lyingConfirmMs
-RTC_DATA_ATTR int   heartbeatCycles      = 10;   // recomputed from heartbeatMs
+RTC_DATA_ATTR int   lyingConfirmCycles   = 1;     // recomputed from lyingConfirmMs
+RTC_DATA_ATTR int   heartbeatCycles      = 10;    // recomputed from heartbeatMs
+RTC_DATA_ATTR int   alertCycles          = 60;    // cycles before Alert  (~30 min at 30s)
+RTC_DATA_ATTR int   emergencyCycles      = 240;   // cycles before Emergency (~2h at 30s)
 
 // ── Runtime (reset each wake) ──────────────────────────────────────────────────
 
@@ -38,7 +42,7 @@ Adafruit_BNO08x bno;
 float curQw = 1, curQx = 0, curQy = 0, curQz = 0;
 float pitch = 0, roll = 0, acceleration = 0;
 String activity = "stable";
-float batteryVoltage = 0;  // read before WiFi to avoid load-sag
+float batteryVoltage = 0;
 
 // ── Setup — runs once per wake cycle ──────────────────────────────────────────
 
@@ -46,7 +50,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
 
-  batteryVoltage = readBatteryVoltage();  // measure before WiFi draws current
+  batteryVoltage = readBatteryVoltage();
 
   initBno();
 
@@ -63,10 +67,16 @@ void setup() {
   HorseState newState = detectState();
   bool stateChanged   = newState != currentState;
   cyclesSinceLastSend++;
-  bool heartbeat = cyclesSinceLastSend >= heartbeatCycles;
 
-  Serial.printf("pitch: %5.1f  roll: %5.1f  accel: %.2f  tilt: %.1f°  state: %s  battery: %.2fV (%d%%)\n",
-    pitch, roll, acceleration, tiltAngleDeg(), stateToString(newState), batteryVoltage, voltageToPercent(batteryVoltage));
+  // Escalate heartbeat frequency when horse is in trouble
+  int sendEvery = heartbeatCycles;
+  if (newState == Alert)     sendEvery = max(1, heartbeatCycles / 5);
+  if (newState == Emergency) sendEvery = 1;
+
+  bool heartbeat = cyclesSinceLastSend >= sendEvery;
+
+  Serial.printf("pitch: %5.1f  roll: %5.1f  accel: %.2f  tilt: %.1f°  lying: %d  state: %s\n",
+    pitch, roll, acceleration, tiltAngleDeg(), lyingCycles, stateToString(newState));
 
   if (stateChanged || heartbeat) {
     currentState        = newState;
@@ -79,8 +89,13 @@ void setup() {
     disconnectWifi();
   }
 
-  Serial.printf("Sleeping %d seconds...\n", SLEEP_SECONDS);
-  esp_sleep_enable_timer_wakeup(SLEEP_US);
+  // Sleep shorter when something might be wrong
+  int sleepSeconds = SLEEP_NORMAL_S;
+  if (newState == Alert)     sleepSeconds = SLEEP_ALERT_S;
+  if (newState == Emergency) sleepSeconds = SLEEP_EMERGENCY_S;
+
+  Serial.printf("Sleeping %d seconds...\n", sleepSeconds);
+  esp_sleep_enable_timer_wakeup((uint64_t)sleepSeconds * 1000000ULL);
   esp_deep_sleep_start();
 }
 
@@ -142,7 +157,7 @@ void initBno() {
   }
   bno.enableReport(SH2_ROTATION_VECTOR);
   bno.enableReport(SH2_LINEAR_ACCELERATION);
-  delay(200);  // let sensor produce its first fresh sample after wake
+  delay(200);
 }
 
 void readSensor() {
@@ -212,21 +227,32 @@ HorseState detectState() {
   bool tilted = tiltAngleDeg() > tiltThresholdDegrees;
   bool moving = acceleration > 0.5f;
 
-  if (tilted && moving) { tiltCycles = 0; return Rolling; }
+  if (tilted && moving) {
+    tiltCycles  = 0;
+    lyingCycles = 0;
+    return Rolling;
+  }
 
   if (tilted) {
     tiltCycles++;
-    return tiltCycles >= lyingConfirmCycles ? LyingDown : currentState;
+    if (tiltCycles < lyingConfirmCycles) return currentState;
+
+    lyingCycles++;  // confirmed lying — count how long
+
+    if (lyingCycles >= emergencyCycles) return Emergency;
+    if (lyingCycles >= alertCycles)     return Alert;
+    return LyingDown;
   }
 
-  tiltCycles = 0;
+  // Horse is upright — reset counters
+  tiltCycles  = 0;
+  lyingCycles = 0;
   return moving ? Moving : Standing;
 }
 
 // ── Battery ───────────────────────────────────────────────────────────────────
 
 float readBatteryVoltage() {
-  // analogReadMilliVolts uses ESP32 factory ADC calibration — more accurate than raw analogRead
   return analogReadMilliVolts(BATTERY_PIN) * 2.0f / 1000.0f;
 }
 
@@ -253,6 +279,8 @@ const char* stateToString(HorseState s) {
     case LyingDown: return "LyingDown";
     case Moving:    return "Moving";
     case Rolling:   return "Rolling";
+    case Alert:     return "Alert";
+    case Emergency: return "Emergency";
     default:        return "Standing";
   }
 }
@@ -283,10 +311,14 @@ void fetchConfig() {
     tiltThresholdDegrees = doc["tiltThresholdDegrees"] | tiltThresholdDegrees;
     int lyingConfirmMs   = doc["lyingConfirmMs"]       | 10000;
     int heartbeatMs      = doc["heartbeatMs"]          | 300000;
-    lyingConfirmCycles   = max(1, lyingConfirmMs   / (SLEEP_SECONDS * 1000));
-    heartbeatCycles      = max(1, heartbeatMs      / (SLEEP_SECONDS * 1000));
-    Serial.printf("Config: threshold=%.0f°  lyingCycles=%d  heartbeatCycles=%d\n",
-      tiltThresholdDegrees, lyingConfirmCycles, heartbeatCycles);
+    int alertMs          = doc["alertMs"]              | 1800000;   // 30 min
+    int emergencyMs      = doc["emergencyMs"]          | 7200000;   // 2 hours
+    lyingConfirmCycles   = max(1, lyingConfirmMs   / (SLEEP_NORMAL_S * 1000));
+    heartbeatCycles      = max(1, heartbeatMs      / (SLEEP_NORMAL_S * 1000));
+    alertCycles          = max(1, alertMs          / (SLEEP_NORMAL_S * 1000));
+    emergencyCycles      = max(1, emergencyMs      / (SLEEP_NORMAL_S * 1000));
+    Serial.printf("Config: threshold=%.0f°  lyingCycles=%d  heartbeatCycles=%d  alertCycles=%d  emergencyCycles=%d\n",
+      tiltThresholdDegrees, lyingConfirmCycles, heartbeatCycles, alertCycles, emergencyCycles);
     if (doc["recalibrate"] | false) {
       calibrate();
       JsonDocument r; r["status"] = calibrationResult;
@@ -314,6 +346,7 @@ void sendReading(HorseState state) {
   doc["acceleration"] = acceleration;
   doc["activity"]     = activity;
   doc["state"]        = stateToString(state);
+  doc["lyingCycles"]  = lyingCycles;
   String body; serializeJson(doc, body);
   post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/readings", body);
 }

@@ -25,5 +25,7 @@ public enum HorseState
     Standing,
     LyingDown,
     Moving,
-    Rolling
+    Rolling,
+    Alert,
+    Emergency
 }

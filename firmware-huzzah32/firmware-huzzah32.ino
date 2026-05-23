@@ -209,7 +209,7 @@ HorseState detectState(float pitch, float roll, float acceleration) {
 // ── Battery ───────────────────────────────────────────────────────────────────
 
 float readBatteryVoltage() {
-  return analogRead(BATTERY_PIN) * 2.0f * 3.3f / 4095.0f;
+  return analogReadMilliVolts(BATTERY_PIN) * 2.0f / 1000.0f;
 }
 
 int voltageToPercent(float v) {
@@ -346,9 +346,11 @@ void loop() {
   if (!timeSynced) syncTime();
 
   readBno(lastPitch, lastRoll, lastAcceleration, lastActivity);
+  float voltage = readBatteryVoltage();  // read before WiFi connects
+  int   percent = voltageToPercent(voltage);
 
-  Serial.printf("pitch: %6.1f  roll: %6.1f  accel: %.2f  tilt: %5.1f°  state: %s\n",
-    lastPitch, lastRoll, lastAcceleration, tiltAngleDeg(), stateToString(detectState(lastPitch, lastRoll, lastAcceleration)));
+  Serial.printf("pitch: %6.1f  roll: %6.1f  accel: %.2f  tilt: %5.1f°  state: %s  battery: %.2fV (%d%%)\n",
+    lastPitch, lastRoll, lastAcceleration, tiltAngleDeg(), stateToString(detectState(lastPitch, lastRoll, lastAcceleration)), voltage, percent);
 
   HorseState newState = detectState(lastPitch, lastRoll, lastAcceleration);
 
@@ -358,9 +360,6 @@ void loop() {
   if (stateChanged || heartbeat) {
     currentState = newState;
     lastSend     = millis();
-
-    float voltage = readBatteryVoltage();
-    int   percent = voltageToPercent(voltage);
 
     sendReading(lastPitch, lastRoll, lastAcceleration, lastActivity, newState);
     sendDeviceStatus(voltage, percent);

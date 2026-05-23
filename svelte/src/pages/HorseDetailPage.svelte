@@ -79,6 +79,15 @@
 
   {#if readings.length > 0}
     {@const latest = readings.at(-1)}
+    {#if latest.state === 'Emergency'}
+      <div class="alert-banner emergency">
+        🚨 Emergency — horse has been lying down for over 2 hours. Check on the animal immediately.
+      </div>
+    {:else if latest.state === 'Alert'}
+      <div class="alert-banner alert">
+        ⚠️ Alert — horse has been lying down for over 30 minutes. Consider checking in.
+      </div>
+    {/if}
     <div class="orientation-card">
       <OrientationViewer
         pitch={latest.pitch ?? 0}
@@ -149,6 +158,9 @@
   .date-picker { display: flex; align-items: center; gap: 0.5rem; }
   .date-picker span { font-size: 0.95rem; color: #475569; }
   input[type="date"] { padding: 0.4rem 0.6rem; font-size: 1rem; }
+  .alert-banner { padding: 0.9rem 1.2rem; border-radius: 0.5rem; font-weight: 600; margin-bottom: 1rem; }
+  .alert-banner.alert     { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+  .alert-banner.emergency { background: #fee2e2; color: #7f1d1d; border: 1px solid #fca5a5; font-size: 1.05rem; }
   .orientation-card { margin-bottom: 1.25rem; }
 table { width: 100%; border-collapse: collapse; }
   th, :global(td) { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }
