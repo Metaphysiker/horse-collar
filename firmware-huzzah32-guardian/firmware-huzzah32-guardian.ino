@@ -4,7 +4,7 @@
 #include <ArduinoJson.h>
 #include <Adafruit_BNO08x.h>
 #include <time.h>
-#include "config.h"
+#include "config.development.h"  // swap to config.infomaniak.h for production
 
 #define BATTERY_PIN     A13
 #define WIFI_TIMEOUT_MS 15000
@@ -38,6 +38,9 @@ RTC_DATA_ATTR bool        timeSynced          = false;
 // Config — stored in RTC so firmware doesn't need to fetch every wake
 RTC_DATA_ATTR int   sleepNormalS         = 1;
 RTC_DATA_ATTR int   sendEveryN           = 60;
+RTC_DATA_ATTR float changeAccel          = 1.5f;
+RTC_DATA_ATTR float changePitch          = 25.0f;
+RTC_DATA_ATTR float changeRoll           = 25.0f;
 
 // Strategy counters
 RTC_DATA_ATTR int   rollingCount         = 0;
@@ -64,9 +67,7 @@ RTC_DATA_ATTR BufferedReading buffer[MAX_BUFFER];
 #define SUDDEN_STOP_N      6
 #define EMA_ALPHA          0.2f
 #define EMA_SETTLE_N       5
-#define CHANGE_ACCEL       1.5f
-#define CHANGE_PITCH       25.0f
-#define CHANGE_ROLL        25.0f
+// CHANGE_ACCEL / CHANGE_PITCH / CHANGE_ROLL are in RTC (fetched from server config)
 
 // ── Runtime (reset each wake) ──────────────────────────────────────────────────
 
@@ -308,7 +309,13 @@ HorseState detectState() {
   }
 
   // [1 — most aggressive] BaselineShift: deviation from EMA of accel + pitch + roll
-  if (settledCycles < EMA_SETTLE_N) {
+  if (settledCycles == 0) {
+    // Seed EMA with actual values so warmup starts from reality, not 0
+    emaAccel = acceleration;
+    emaPitch = pitch;
+    emaRoll  = roll;
+    settledCycles++;
+  } else if (settledCycles < EMA_SETTLE_N) {
     emaAccel = EMA_ALPHA * acceleration + (1 - EMA_ALPHA) * emaAccel;
     emaPitch = EMA_ALPHA * pitch        + (1 - EMA_ALPHA) * emaPitch;
     emaRoll  = EMA_ALPHA * roll         + (1 - EMA_ALPHA) * emaRoll;
@@ -320,7 +327,7 @@ HorseState detectState() {
     emaAccel = EMA_ALPHA * acceleration + (1 - EMA_ALPHA) * emaAccel;
     emaPitch = EMA_ALPHA * pitch        + (1 - EMA_ALPHA) * emaPitch;
     emaRoll  = EMA_ALPHA * roll         + (1 - EMA_ALPHA) * emaRoll;
-    if (da > CHANGE_ACCEL || dp > CHANGE_PITCH || dr > CHANGE_ROLL) {
+    if (da > changeAccel || dp > changePitch || dr > changeRoll) {
       alertReason = "BaselineShift";
       return Alert;
     }
@@ -459,9 +466,13 @@ void fetchConfig() {
   if (code == 200) {
     JsonDocument doc;
     deserializeJson(doc, http.getString());
-    sleepNormalS = doc["sleepSeconds"] | sleepNormalS;
-    sendEveryN   = doc["sendEveryN"]   | sendEveryN;
-    Serial.printf("Config: sleep=%ds  sendEveryN=%d\n", sleepNormalS, sendEveryN);
+    sleepNormalS = doc["sleepSeconds"]  | sleepNormalS;
+    sendEveryN   = doc["sendEveryN"]    | sendEveryN;
+    changeAccel  = doc["changeAccel"]   | changeAccel;
+    changePitch  = doc["changePitch"]   | changePitch;
+    changeRoll   = doc["changeRoll"]    | changeRoll;
+    Serial.printf("Config: sleep=%ds  sendEveryN=%d  changeAccel=%.2f  changePitch=%.1f  changeRoll=%.1f\n",
+      sleepNormalS, sendEveryN, changeAccel, changePitch, changeRoll);
     if (doc["reboot"] | false) {
       post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/reboot/clear", "{}");
       Serial.println("Remote reboot triggered");

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-SERVER=deploy@84.234.19.192
+SERVER=deploy@179.237.68.137
 REMOTE_DIR=/home/deploy/horse-collar
 
 echo "=== Pre-Deployment Checks ==="
@@ -73,7 +73,7 @@ docker compose --file docker-compose.build.yml build
 docker save horse-collar-webapi | bzip2 | pv | ssh $SERVER docker load
 docker save horse-collar-svelte  | bzip2 | pv | ssh $SERVER docker load
 
-scp docker-compose.remote.yml deploy@84.234.19.192:$REMOTE_DIR
+scp docker-compose.remote.yml $SERVER:$REMOTE_DIR
 scp .env                       $SERVER:$REMOTE_DIR
 scp deployment.txt             $SERVER:$REMOTE_DIR
 

@@ -72,6 +72,42 @@
 
       </section>
 
+      <section>
+        <h2>BaselineShift Sensitivity</h2>
+
+        <label>
+          Accel delta threshold (m/s²)
+          <span class="hint">How much acceleration must change from the running average to trigger an alert — lower = more sensitive</span>
+          <input type="number" min="0.1" max="10" step="0.1" bind:value={config.changeAccel} />
+        </label>
+
+        <label>
+          Pitch delta threshold (°)
+          <span class="hint">How many degrees pitch must change from baseline</span>
+          <input type="number" min="1" max="90" step="1" bind:value={config.changePitch} />
+        </label>
+
+        <label>
+          Roll delta threshold (°)
+          <span class="hint">How many degrees roll must change from baseline</span>
+          <input type="number" min="1" max="90" step="1" bind:value={config.changeRoll} />
+        </label>
+
+      </section>
+
+      <section>
+        <h2>Notifications</h2>
+
+        <label class="toggle-row">
+          <span>
+            Enable ntfy alerts
+            <span class="hint">Send a push notification when an alert is detected. Requires ntfy to be configured on the server.</span>
+          </span>
+          <input type="checkbox" bind:checked={config.ntfyEnabled} />
+        </label>
+
+      </section>
+
       <button type="submit" class="save" disabled={loading}>
         {loading ? 'Saving...' : 'Save'}
       </button>
@@ -107,4 +143,6 @@
   .status { padding: 0.75rem; border-radius: 4px; margin-top: 1rem; }
   .ok    { background: #dcfce7; color: #166534; }
   .error { background: #fee2e2; color: #991b1b; }
+  .toggle-row { flex-direction: row; justify-content: space-between; align-items: flex-start; }
+  .toggle-row input[type="checkbox"] { width: 1.25rem; height: 1.25rem; margin-top: 0.1rem; flex-shrink: 0; }
 </style>

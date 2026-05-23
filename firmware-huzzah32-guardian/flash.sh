@@ -13,4 +13,10 @@ arduino-cli compile --fqbn "$FQBN" "$SKETCH"
 echo "Uploading..."
 arduino-cli upload -p "$PORT" --fqbn "$FQBN" "$SKETCH"
 
-echo "Done. Run ./monitor.sh to see serial output."
+CONFIG=$(grep '#include "config' "$SKETCH" | grep -o '"config[^"]*"' | tr -d '"')
+cat > last-flash.txt <<EOF
+date:   $(date '+%Y-%m-%d %H:%M:%S')
+config: $CONFIG
+commit: $(git rev-parse --short HEAD 2>/dev/null || echo "no git")
+EOF
+echo "Done. Logged to last-flash.txt. Run ./monitor.sh to see serial output."

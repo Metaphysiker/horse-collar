@@ -8,3 +8,6 @@ webapi/obj/
 # Arduino
 firmware-huzzah32/build/
 firmware-huzzah32/config.h
+firmware-huzzah32-guardian/last-flash.txt
+firmware-huzzah32-guardian/config.development.h
+firmware-huzzah32-guardian/config.infomaniak.h

@@ -6,6 +6,7 @@ using MongoDB.Driver;
 public class SensorReadingsController(IMongoDatabase db, HorseService horseService, NtfyService ntfy) : ControllerBase
 {
     private readonly IMongoCollection<SensorReading> _readings = db.GetCollection<SensorReading>("sensorReadings");
+    private readonly IMongoCollection<CollarConfig> _configs = db.GetCollection<CollarConfig>("collarConfigs");
 
     [HttpGet]
     public async Task<List<SensorReading>> GetByHorse(string horseId, [FromQuery] DateOnly? date)
@@ -36,6 +37,15 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
         await horseService.EnsureExistsAsync(horseId);
         readings.ForEach(r => r.HorseId = horseId);
         await _readings.InsertManyAsync(readings);
+
+        var config = await _configs.Find(c => c.HorseId == horseId).FirstOrDefaultAsync();
+        if (config?.NtfyEnabled == true)
+        {
+            var alert = readings.LastOrDefault(r => r.State is HorseState.Alert or HorseState.Emergency);
+            if (alert is not null)
+                await ntfy.NotifyAsync(horseId, alert.State, alert.AlertReason ?? "Unknown");
+        }
+
         return Created();
     }
 
