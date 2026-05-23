@@ -1,10 +1,11 @@
 #include <WiFi.h>
 #include <WiFiMulti.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Adafruit_BNO08x.h>
 #include <time.h>
-#include "config.development.h"  // swap to config.infomaniak.h for production
+#include "config.infomaniak.h"  // swap to config.development.h for local development
 
 #define BATTERY_PIN     A13
 #define WIFI_TIMEOUT_MS 15000
@@ -399,8 +400,15 @@ const char* idxToAlertReason(uint8_t idx) {
 
 bool post(String url, String body) {
   if (!ensureWifi()) return false;
+  Serial.println("POST " + url);
   HTTPClient http;
-  http.begin(url);
+  if (url.startsWith("https")) {
+    WiFiClientSecure* client = new WiFiClientSecure;
+    client->setInsecure();
+    http.begin(*client, url);
+  } else {
+    http.begin(url);
+  }
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(body);
@@ -460,7 +468,14 @@ void flushBuffer() {
 void fetchConfig() {
   if (!ensureWifi()) return;
   HTTPClient http;
-  http.begin(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config");
+  String url = String(SERVER_URL) + "/horses/" + HORSE_ID + "/config";
+  if (url.startsWith("https")) {
+    WiFiClientSecure* client = new WiFiClientSecure;
+    client->setInsecure();
+    http.begin(*client, url);
+  } else {
+    http.begin(url);
+  }
   http.setTimeout(HTTP_TIMEOUT_MS);
   int code = http.GET();
   if (code == 200) {

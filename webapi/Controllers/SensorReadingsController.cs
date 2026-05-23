@@ -25,9 +25,15 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
     {
         await horseService.EnsureExistsAsync(horseId);
         reading.HorseId = horseId;
-
-
         await _readings.InsertOneAsync(reading);
+
+        if (reading.State is HorseState.Alert or HorseState.Emergency)
+        {
+            var config = await _configs.Find(c => c.HorseId == horseId).FirstOrDefaultAsync();
+            if (config?.NtfyEnabled == true)
+                await ntfy.NotifyAsync(horseId, reading.State, reading.AlertReason ?? "Unknown");
+        }
+
         return Created();
     }
 
