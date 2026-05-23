@@ -3,7 +3,7 @@ using MongoDB.Driver;
 
 [ApiController]
 [Route("horses/{horseId}/config")]
-public class CollarConfigController(IMongoDatabase db) : ControllerBase
+public class CollarConfigController(IMongoDatabase db, NtfyService ntfy) : ControllerBase
 {
     private readonly IMongoCollection<CollarConfig> _configs = db.GetCollection<CollarConfig>("collarConfigs");
 
@@ -31,24 +31,6 @@ public class CollarConfigController(IMongoDatabase db) : ControllerBase
         return Ok(result);
     }
 
-    [HttpPost("recalibrate")]
-    public async Task<IActionResult> Recalibrate(string horseId)
-    {
-        var update = Builders<CollarConfig>.Update.Set(c => c.Recalibrate, true);
-        await _configs.UpdateOneAsync(c => c.HorseId == horseId, update, new UpdateOptions { IsUpsert = true });
-        return NoContent();
-    }
-
-    [HttpPost("recalibrate/clear")]
-    public async Task<IActionResult> ClearRecalibrate(string horseId, [FromBody] CalibrationResult result)
-    {
-        var update = Builders<CollarConfig>.Update
-            .Set(c => c.Recalibrate, false)
-            .Set(c => c.CalibrationStatus, result.Status)
-            .Set(c => c.CalibrationTime, DateTime.UtcNow);
-        await _configs.UpdateOneAsync(c => c.HorseId == horseId, update);
-        return NoContent();
-    }
 
     [HttpPost("reboot")]
     public async Task<IActionResult> Reboot(string horseId)
@@ -66,5 +48,11 @@ public class CollarConfigController(IMongoDatabase db) : ControllerBase
         return NoContent();
     }
 
-    public record CalibrationResult(string Status);
+    [HttpPost("test-notification")]
+    public async Task<IActionResult> TestNotification(string horseId)
+    {
+        await ntfy.NotifyAsync(horseId, HorseState.Alert, "TestNotification");
+        return NoContent();
+    }
+
 }

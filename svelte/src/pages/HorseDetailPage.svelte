@@ -6,15 +6,12 @@
   import { sensorReadings } from '../services/sensorReadings.js';
   import { deviceStatus } from '../services/deviceStatus.js';
   import SensorReadingRow from '../components/SensorReadingRow.svelte';
-  import OrientationViewer from '../components/OrientationViewer.svelte';
   import { formatDate, formatDateOnly } from '../utils/formatDate.js';
-  import { collarConfig } from '../services/collarConfig.js';
 
   let { params = {} } = $props();
 
   let horse = $state(null);
   let status = $state(null);
-  let config = $state(null);
   let readings = $state([]);
   let selectedDate = $state(todayString());
 
@@ -25,18 +22,14 @@
   let refreshInterval;
 
   onMount(async () => {
-    [horse, status, config] = await Promise.all([
+    [horse, status] = await Promise.all([
       horses.getById(params.id),
       deviceStatus.getLatest(params.id).catch(() => null),
-      collarConfig.get(params.id).catch(() => null),
     ]);
     await loadReadings();
     refreshInterval = setInterval(async () => {
       if (selectedDate === todayString()) {
-        [status, config] = await Promise.all([
-          deviceStatus.getLatest(params.id).catch(() => status),
-          collarConfig.get(params.id).catch(() => config),
-        ]);
+        status = await deviceStatus.getLatest(params.id).catch(() => status);
         await loadReadings();
       }
     }, 5000);
@@ -89,15 +82,38 @@
       </div>
     {/if}
     <div class="orientation-card">
-      <OrientationViewer
-        pitch={latest.pitch ?? 0}
-        roll={latest.roll ?? 0}
-        pitchRef={status?.pitchRef ?? 0}
-        rollRef={status?.rollRef ?? 0}
-        threshold={config?.tiltThresholdDegrees ?? 60}
-        tiltDeg={latest.tiltDeg ?? null}
-      />
-
+      <div class="sensor-strip">
+        <div class="sensor-stat">
+          <span class="stat-label">Pitch</span>
+          <span class="stat-value">{latest.pitch?.toFixed(1) ?? '—'}°</span>
+        </div>
+        <div class="sensor-stat">
+          <span class="stat-label">Roll</span>
+          <span class="stat-value">{latest.roll?.toFixed(1) ?? '—'}°</span>
+        </div>
+        <div class="sensor-stat">
+          <span class="stat-label">Tilt</span>
+          <span class="stat-value">{latest.tiltDeg?.toFixed(1) ?? '—'}°</span>
+        </div>
+        <div class="sensor-stat">
+          <span class="stat-label">Accel</span>
+          <span class="stat-value">{latest.acceleration?.toFixed(2) ?? '—'} m/s²</span>
+        </div>
+        <div class="sensor-stat">
+          <span class="stat-label">Gyro</span>
+          <span class="stat-value">{latest.angularVelocity?.toFixed(2) ?? '—'} rad/s</span>
+        </div>
+        <div class="sensor-stat">
+          <span class="stat-label">Temp</span>
+          <span class="stat-value">{latest.temperature != null ? latest.temperature.toFixed(1) + ' °C' : '—'}</span>
+        </div>
+        {#if latest.alertReason}
+          <div class="sensor-stat reason">
+            <span class="stat-label">Reason</span>
+            <span class="stat-value">{latest.alertReason}</span>
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 
@@ -124,8 +140,10 @@
           <th>State</th>
           <th>Pitch</th>
           <th>Roll</th>
-          <th>Acceleration</th>
-          <th>Activity</th>
+          <th>Tilt</th>
+          <th>Accel</th>
+          <th>Gyro</th>
+          <th>Temp</th>
           <th></th>
         </tr>
       </thead>
@@ -161,8 +179,20 @@
   .alert-banner { padding: 0.9rem 1.2rem; border-radius: 0.5rem; font-weight: 600; margin-bottom: 1rem; }
   .alert-banner.alert     { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
   .alert-banner.emergency { background: #fee2e2; color: #7f1d1d; border: 1px solid #fca5a5; font-size: 1.05rem; }
-  .orientation-card { margin-bottom: 1.25rem; }
-table { width: 100%; border-collapse: collapse; }
-  th, :global(td) { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }
-  th { font-weight: 600; }
+  .sensor-strip {
+    display: flex; flex-wrap: wrap; gap: 0.5rem;
+    padding: 0.75rem 1rem; background: #f8fafc;
+    border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 0.5rem 0.5rem;
+  }
+  .sensor-stat {
+    display: flex; flex-direction: column; align-items: center;
+    min-width: 70px; padding: 0.3rem 0.6rem;
+    background: white; border: 1px solid #e2e8f0; border-radius: 6px;
+  }
+  .sensor-stat.reason { min-width: auto; }
+  .stat-label { font-size: 0.72rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat-value { font-size: 0.9rem; font-weight: 600; color: #1e293b; margin-top: 0.1rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, :global(td) { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid #ddd; font-size: 0.9rem; }
+  th { font-weight: 600; white-space: nowrap; }
 </style>

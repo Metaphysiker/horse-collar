@@ -44,35 +44,32 @@
     <form onsubmit={(e) => { e.preventDefault(); save(); }}>
 
       <section>
-        <h2>Detection</h2>
-
-        <label>
-          Tilt threshold (degrees)
-          <span class="hint">Pitch or roll beyond this angle → horse is tilted</span>
-          <input type="number" min="10" max="90" step="1" bind:value={config.tiltThresholdDegrees} />
-        </label>
-
-        <label>
-          Lying confirm time (ms)
-          <span class="hint">Tilt must hold this long before state changes to LyingDown</span>
-          <input type="number" min="1000" step="1000" bind:value={config.lyingConfirmMs} />
-        </label>
-      </section>
-
-      <section>
         <h2>Timing</h2>
 
         <label>
-          Heartbeat interval (ms)
-          <span class="hint">How often the collar checks in when no state change occurs</span>
-          <input type="number" min="10000" step="1000" bind:value={config.heartbeatMs} />
+          Sleep interval (seconds)
+          <span class="hint">How long the collar sleeps between readings — lower = more data, shorter battery</span>
+          <div class="presets">
+            <button type="button" class:active={config.sleepSeconds === 1}  onclick={() => config.sleepSeconds = 1}>1s — Max</button>
+            <button type="button" class:active={config.sleepSeconds === 2}  onclick={() => config.sleepSeconds = 2}>2s — Collection</button>
+            <button type="button" class:active={config.sleepSeconds === 10} onclick={() => config.sleepSeconds = 10}>10s — Dense</button>
+            <button type="button" class:active={config.sleepSeconds === 30} onclick={() => config.sleepSeconds = 30}>30s — Normal</button>
+          </div>
+          <input type="number" min="1" max="300" step="1" bind:value={config.sleepSeconds} />
         </label>
 
         <label>
-          Sample interval (ms)
-          <span class="hint">How often the BNO085 is read</span>
-          <input type="number" min="100" max="5000" step="100" bind:value={config.sampleIntervalMs} />
+          Send every N readings
+          <span class="hint">Upload a batch after this many wake cycles — higher = less WiFi, better battery</span>
+          <div class="presets">
+            <button type="button" class:active={config.sendEveryN === 5}   onclick={() => config.sendEveryN = 5}>5 — Collection</button>
+            <button type="button" class:active={config.sendEveryN === 20}  onclick={() => config.sendEveryN = 20}>20 — Dense</button>
+            <button type="button" class:active={config.sendEveryN === 60}  onclick={() => config.sendEveryN = 60}>60 — Normal</button>
+            <button type="button" class:active={config.sendEveryN === 200} onclick={() => config.sendEveryN = 200}>200 — Battery</button>
+          </div>
+          <input type="number" min="1" max="1000" step="1" bind:value={config.sendEveryN} />
         </label>
+
       </section>
 
       <button type="submit" class="save" disabled={loading}>
@@ -102,6 +99,9 @@
   label:last-child { margin-bottom: 0; }
   .hint { font-weight: 400; font-size: 0.85rem; color: #64748b; }
   input { padding: 0.5rem; font-size: 1rem; border: 1px solid #ddd; border-radius: 4px; }
+  .presets { display: flex; gap: 0.5rem; margin-bottom: 0.4rem; }
+  .presets button { padding: 0.3rem 0.75rem; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; background: white; font-size: 0.85rem; font-weight: 400; }
+  .presets button.active { background: #1e293b; color: white; border-color: #1e293b; }
   .save { background: #1e293b; color: white; border: none; border-radius: 4px; padding: 0.6rem 1.5rem; font-size: 1rem; }
   .save:disabled { opacity: 0.6; cursor: not-allowed; }
   .status { padding: 0.75rem; border-radius: 4px; margin-top: 1rem; }

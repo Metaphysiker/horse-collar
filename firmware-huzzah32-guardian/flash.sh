@@ -13,4 +13,4 @@ arduino-cli compile --fqbn "$FQBN" "$SKETCH"
 echo "Uploading..."
 arduino-cli upload -p "$PORT" --fqbn "$FQBN" "$SKETCH"
 
-echo "Done. Run ../firmware-huzzah32/monitor.sh to see serial output."
+echo "Done. Run ./monitor.sh to see serial output."

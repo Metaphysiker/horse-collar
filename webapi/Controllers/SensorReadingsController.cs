@@ -3,7 +3,7 @@ using MongoDB.Driver;
 
 [ApiController]
 [Route("horses/{horseId}/readings")]
-public class SensorReadingsController(IMongoDatabase db, HorseService horseService) : ControllerBase
+public class SensorReadingsController(IMongoDatabase db, HorseService horseService, NtfyService ntfy) : ControllerBase
 {
     private readonly IMongoCollection<SensorReading> _readings = db.GetCollection<SensorReading>("sensorReadings");
 
@@ -24,6 +24,8 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
     {
         await horseService.EnsureExistsAsync(horseId);
         reading.HorseId = horseId;
+
+
         await _readings.InsertOneAsync(reading);
         return Created();
     }

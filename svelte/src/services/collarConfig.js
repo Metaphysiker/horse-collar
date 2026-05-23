@@ -8,9 +8,9 @@ export const collarConfig = {
   update: (horseId, config) =>
     request(`/horses/${horseId}/config`, { method: 'PUT', body: JSON.stringify(config) }),
 
-  triggerRecalibrate: (horseId) =>
-    request(`/horses/${horseId}/config/recalibrate`, { method: 'POST' }),
-
   triggerReboot: (horseId) =>
     request(`/horses/${horseId}/config/reboot`, { method: 'POST' }),
+
+  testNotification: (horseId) =>
+    request(`/horses/${horseId}/config/test-notification`, { method: 'POST' }),
 };
