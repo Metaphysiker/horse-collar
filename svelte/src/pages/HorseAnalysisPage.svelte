@@ -22,7 +22,8 @@
   let fromTime = $state('00:00');
   let toDate   = $state(todayString());
   let toTime   = $state('23:59');
-  let stillThreshold = $state(0.2);
+  let stillThreshold   = $state(0.2);
+  let extremeSigma     = $state(3);
 
   onMount(async () => {
     horse = await horses.getById(params.id);
@@ -375,6 +376,56 @@
       </section>
     {/if}
 
+    <!-- ── Extreme outlier timeline ──────────────────────────────────────── -->
+    {#if stillStats() && allReadings.length > 1}
+      {@const ss = stillStats()}
+      {@const t0 = new Date(allReadings[0].timestamp).getTime()}
+      {@const t1 = new Date(allReadings[allReadings.length - 1].timestamp).getTime()}
+      {@const tspan = t1 - t0 || 1}
+      {@const tpct = r => ((new Date(r.timestamp).getTime() - t0) / tspan * 100).toFixed(3)}
+      {@const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      <section>
+        <h2>Extreme Outlier Timeline</h2>
+        <div class="sigma-control">
+          <label>
+            Threshold: <strong>{extremeSigma}σ</strong>
+            = avg ± {extremeSigma}× stddev
+          </label>
+          <input type="range" min="1" max="6" step="0.5" bind:value={extremeSigma} />
+          <span class="sigma-hint">← more &nbsp; fewer →</span>
+        </div>
+        {#each [
+          { label: 'Pitch', baseline: ss.pitch, getVal: r => r.pitch },
+          { label: 'Roll',  baseline: ss.roll,  getVal: r => r.roll  },
+          { label: 'Tilt',  baseline: ss.tilt,  getVal: r => tilt(r) },
+        ] as row}
+          {#if row.baseline}
+            {@const lo = row.baseline.avg - extremeSigma * row.baseline.stddev}
+            {@const hi = row.baseline.avg + extremeSigma * row.baseline.stddev}
+            {@const outs = allReadings.filter(r => {
+              const v = row.getVal(r);
+              return v != null && (v < lo || v > hi);
+            })}
+            <div class="zt-row">
+              <span class="zt-label">{row.label}</span>
+              <div class="zt-track">
+                {#each outs as r}
+                  <div class="zt-tick zt-tick-extreme" style="left:{tpct(r)}%"
+                    title="{new Date(r.timestamp).toLocaleTimeString()} — {fmt(row.getVal(r))}°"></div>
+                {/each}
+              </div>
+              <span class="zt-count">{outs.length}</span>
+            </div>
+            <div class="sigma-range">avg {fmt(row.baseline.avg)}° ± {fmt(extremeSigma * row.baseline.stddev)}° → outside [{fmt(lo)}°, {fmt(hi)}°]</div>
+          {/if}
+        {/each}
+        <div class="zt-axis">
+          <span>{fmtTime(allReadings[0].timestamp)}</span>
+          <span>{fmtTime(allReadings[allReadings.length - 1].timestamp)}</span>
+        </div>
+      </section>
+    {/if}
+
     <!-- ── Extreme points ────────────────────────────────────────────────── -->
     <section>
       <h2>Extreme Points</h2>
@@ -464,8 +515,14 @@
   .zt-label { width: 50px; font-size: 0.82rem; font-weight: 600; color: #475569; flex-shrink: 0; }
   .zt-track { flex: 1; height: 28px; background: #f1f5f9; border-radius: 4px; position: relative; }
   .zt-tick { position: absolute; top: 3px; width: 2px; height: 22px; background: #dc2626; border-radius: 1px; transform: translateX(-50%); opacity: 0.7; }
+  .zt-tick-extreme { background: #7c3aed; opacity: 0.9; }
   .zt-count { width: 45px; font-size: 0.82rem; font-weight: 600; color: #dc2626; text-align: right; flex-shrink: 0; }
   .zt-axis { display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem; padding: 0 0 0 60px; }
+  .sigma-control { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .sigma-control label { font-size: 0.88rem; color: #475569; }
+  .sigma-control input { width: 160px; accent-color: #7c3aed; }
+  .sigma-hint { font-size: 0.75rem; color: #94a3b8; }
+  .sigma-range { font-size: 0.75rem; color: #94a3b8; margin: -0.3rem 0 0.6rem 60px; }
   .histo-group { margin-bottom: 1.5rem; }
   .histo-title { font-size: 0.82rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
   .histo-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.2rem; }
