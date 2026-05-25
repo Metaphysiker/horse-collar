@@ -33,7 +33,7 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
         {
             var config = await _configs.Find(c => c.HorseId == horseId).FirstOrDefaultAsync();
             if (config?.NtfyEnabled == true)
-                await ntfy.NotifyAsync(horseId, reading.State, reading.AlertReason ?? "Unknown");
+                await ntfy.NotifyAsync(horseId, reading.State, $"[Firmware] {reading.AlertReason ?? "Unknown"}");
         }
 
         return Created();
@@ -51,17 +51,17 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
         {
             var alert = readings.LastOrDefault(r => r.State is HorseState.Alert or HorseState.Emergency);
             if (alert is not null)
-                await ntfy.NotifyAsync(horseId, alert.State, alert.AlertReason ?? "Unknown");
+                await ntfy.NotifyAsync(horseId, alert.State, $"[Firmware] {alert.AlertReason ?? "Unknown"}");
         }
 
         if (config?.LyingDownAlertEnabled == true)
         {
             var lyingDown = readings.FirstOrDefault(r =>
-                Math.Sqrt((double)(r.Pitch * r.Pitch + r.Roll * r.Roll)) > 90);
+                Math.Sqrt((double)(r.Pitch * r.Pitch + r.Roll * r.Roll)) > 70);
             if (lyingDown is not null)
             {
                 var side = lyingDown.Roll > 0 ? "left side" : "right side";
-                await ntfy.NotifyAsync(horseId, HorseState.Alert, $"LyingDown — {side} (tilt {Math.Sqrt((double)(lyingDown.Pitch * lyingDown.Pitch + lyingDown.Roll * lyingDown.Roll)):F0}°)");
+                await ntfy.NotifyAsync(horseId, HorseState.Alert, $"[LyingDown] {side} (tilt {Math.Sqrt((double)(lyingDown.Pitch * lyingDown.Pitch + lyingDown.Roll * lyingDown.Roll)):F0}°)");
             }
         }
 
@@ -77,7 +77,7 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
                     ? (highRoll.Roll - 5) / 67f * 90f
                     : (highRoll.Roll - 5) / 70f * 90f;
                 var side = horseRoll > 0 ? "left" : "right";
-                await ntfy.NotifyAsync(horseId, HorseState.Alert, $"High roll — {side} side (horse roll ~{Math.Abs(horseRoll):F0}°)");
+                await ntfy.NotifyAsync(horseId, HorseState.Alert, $"[HighRoll] {side} side (horse roll ~{Math.Abs(horseRoll):F0}°)");
             }
         }
 
