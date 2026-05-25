@@ -335,6 +335,46 @@
       </section>
     {/if}
 
+    <!-- ── Outlier timeline ───────────────────────────────────────────────── -->
+    {#if stillStats() && allReadings.length > 1}
+      {@const ss = stillStats()}
+      {@const t0 = new Date(allReadings[0].timestamp).getTime()}
+      {@const t1 = new Date(allReadings[allReadings.length - 1].timestamp).getTime()}
+      {@const tspan = t1 - t0 || 1}
+      {@const tpct = r => ((new Date(r.timestamp).getTime() - t0) / tspan * 100).toFixed(3)}
+      {@const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      <section>
+        <h2>Outlier Timeline</h2>
+        <p class="desc">Each tick = one reading outside the still-period baseline. Clusters mean repeated outliers close together in time.</p>
+        {#each [
+          { label: 'Pitch', baseline: ss.pitch, getVal: r => r.pitch },
+          { label: 'Roll',  baseline: ss.roll,  getVal: r => r.roll  },
+          { label: 'Tilt',  baseline: ss.tilt,  getVal: r => tilt(r) },
+        ] as row}
+          {#if row.baseline}
+            {@const outs = allReadings.filter(r => {
+              const v = row.getVal(r);
+              return v != null && (v < row.baseline.p5 || v > row.baseline.p95);
+            })}
+            <div class="zt-row">
+              <span class="zt-label">{row.label}</span>
+              <div class="zt-track">
+                {#each outs as r}
+                  <div class="zt-tick" style="left:{tpct(r)}%"
+                    title="{new Date(r.timestamp).toLocaleTimeString()} — {fmt(row.getVal(r))}°"></div>
+                {/each}
+              </div>
+              <span class="zt-count">{outs.length}</span>
+            </div>
+          {/if}
+        {/each}
+        <div class="zt-axis">
+          <span>{fmtTime(allReadings[0].timestamp)}</span>
+          <span>{fmtTime(allReadings[allReadings.length - 1].timestamp)}</span>
+        </div>
+      </section>
+    {/if}
+
     <!-- ── Extreme points ────────────────────────────────────────────────── -->
     <section>
       <h2>Extreme Points</h2>
@@ -420,6 +460,12 @@
   .legend-band { display: inline-block; width: 24px; height: 10px; border-radius: 4px; background: #64748b; opacity: 0.35; }
   .legend-avgline { display: inline-block; width: 3px; height: 14px; background: #1e293b; border-radius: 2px; }
   .legend-dot { display: inline-block; width: 10px; height: 10px; background: #dc2626; border: 2px solid white; border-radius: 50%; outline: 1px solid #dc2626; }
+  .zt-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem; }
+  .zt-label { width: 50px; font-size: 0.82rem; font-weight: 600; color: #475569; flex-shrink: 0; }
+  .zt-track { flex: 1; height: 28px; background: #f1f5f9; border-radius: 4px; position: relative; }
+  .zt-tick { position: absolute; top: 3px; width: 2px; height: 22px; background: #dc2626; border-radius: 1px; transform: translateX(-50%); opacity: 0.7; }
+  .zt-count { width: 45px; font-size: 0.82rem; font-weight: 600; color: #dc2626; text-align: right; flex-shrink: 0; }
+  .zt-axis { display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem; padding: 0 0 0 60px; }
   .histo-group { margin-bottom: 1.5rem; }
   .histo-title { font-size: 0.82rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
   .histo-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.2rem; }
