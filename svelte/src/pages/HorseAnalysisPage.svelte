@@ -19,7 +19,9 @@
   }
 
   let fromDate = $state(yesterdayString());
+  let fromTime = $state('00:00');
   let toDate   = $state(todayString());
+  let toTime   = $state('23:59');
   let stillThreshold = $state(0.2);
 
   onMount(async () => {
@@ -38,7 +40,13 @@
       days.push(d.toISOString().slice(0, 10));
 
     const results = await Promise.all(days.map(d => sensorReadings.getByHorse(params.id, d)));
-    allReadings = results.flat();
+    // Parse as local time so the user always enters what they see on the clock
+    const fromDt = new Date(`${fromDate}T${fromTime}:00`);
+    const toDt   = new Date(`${toDate}T${toTime}:59`);
+    allReadings = results.flat().filter(r => {
+      const t = new Date(r.timestamp);
+      return t >= fromDt && t <= toDt;
+    });
     loading = false;
   }
 
@@ -126,8 +134,16 @@
       <input type="date" bind:value={fromDate} max={toDate} />
     </label>
     <label>
+      Time
+      <input type="time" bind:value={fromTime} />
+    </label>
+    <label>
       To
       <input type="date" bind:value={toDate} min={fromDate} max={todayString()} />
+    </label>
+    <label>
+      Time
+      <input type="time" bind:value={toTime} />
     </label>
     <label>
       Still threshold (accel &lt;)
