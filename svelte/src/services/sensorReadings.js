@@ -2,8 +2,11 @@
 import request from './api.js';
 
 export const sensorReadings = {
-  getByHorse: (horseId, date) =>
-    request(`/horses/${horseId}/readings?date=${date}`),
+  getByHorse: (horseId, date, limit = null) => {
+    const params = new URLSearchParams({ date });
+    if (limit != null) params.set('limit', limit);
+    return request(`/horses/${horseId}/readings?${params}`);
+  },
 
   create: (horseId, reading) =>
     request(`/horses/${horseId}/readings`, { method: 'POST', body: JSON.stringify(reading) }),

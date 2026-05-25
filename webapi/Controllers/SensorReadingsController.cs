@@ -9,15 +9,19 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
     private readonly IMongoCollection<CollarConfig> _configs = db.GetCollection<CollarConfig>("collarConfigs");
 
     [HttpGet]
-    public async Task<List<SensorReading>> GetByHorse(string horseId, [FromQuery] DateOnly? date)
+    public async Task<List<SensorReading>> GetByHorse(string horseId, [FromQuery] DateOnly? date, [FromQuery] int? limit)
     {
         var day = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
         var from = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
         var to   = day.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
-        return await _readings
+        var query = _readings
             .Find(r => r.HorseId == horseId && r.Timestamp >= from && r.Timestamp <= to)
-            .SortBy(r => r.Timestamp)
-            .ToListAsync();
+            .SortByDescending(r => r.Timestamp);
+        if (limit is > 0)
+            query = query.Limit(limit.Value);
+        var results = await query.ToListAsync();
+        results.Reverse();
+        return results;
     }
 
     [HttpPost]
