@@ -54,6 +54,7 @@
   {#if horse}
     <div class="header">
       <h1>{horse.name}</h1>
+      <button onclick={() => push(`/horses/${params.id}/analysis`)}>Analysis</button>
       <button onclick={() => push(`/horses/${params.id}/actions`)}>Device Actions</button>
     </div>
     <div class="device-status">
@@ -93,7 +94,7 @@
         </div>
         <div class="sensor-stat">
           <span class="stat-label">Tilt</span>
-          <span class="stat-value">{latest.tiltDeg?.toFixed(1) ?? '—'}°</span>
+          <span class="stat-value">{(latest.pitch != null && latest.roll != null) ? Math.sqrt(latest.pitch**2 + latest.roll**2).toFixed(1) : '—'}°</span>
         </div>
         <div class="sensor-stat">
           <span class="stat-label">Accel</span>

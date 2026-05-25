@@ -26,7 +26,7 @@
   </td>
   <td>{reading.pitch?.toFixed(1)}°</td>
   <td>{reading.roll?.toFixed(1)}°</td>
-  <td>{reading.tiltDeg?.toFixed(1) ?? '—'}°</td>
+  <td>{(reading.pitch != null && reading.roll != null) ? Math.sqrt(reading.pitch**2 + reading.roll**2).toFixed(1) : '—'}°</td>
   <td>{reading.acceleration?.toFixed(2)}</td>
   <td>{reading.angularVelocity?.toFixed(2) ?? '—'}</td>
   <td>{reading.temperature != null ? reading.temperature.toFixed(1) + '°' : '—'}</td>
