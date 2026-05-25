@@ -188,6 +188,33 @@
             <tr><td>Acceleration</td><td>{fmt(s.accel?.p5, 2)}</td><td>{fmt(s.accel?.avg, 2)}</td><td>{fmt(s.accel?.p95, 2)}</td><td>±{fmt(s.accel?.stddev, 2)}</td></tr>
           </tbody>
         </table>
+
+        <div class="range-chart">
+          {#each [
+            { label: 'Pitch (sensor)', st: s.pitch, unit: '°', color: '#3b82f6' },
+            { label: 'Roll (sensor)',  st: s.roll,  unit: '°', color: '#f59e0b' },
+            { label: 'Tilt',          st: s.tilt,  unit: '°', color: '#22c55e' },
+          ] as { label, st, unit, color }}
+            {#if st}
+              {@const span = st.max - st.min || 1}
+              {@const p5pct  = (st.p5  - st.min) / span * 100}
+              {@const p95pct = (st.p95 - st.min) / span * 100}
+              {@const avgpct = (st.avg - st.min) / span * 100}
+              <div class="range-row">
+                <span class="range-label">{label}</span>
+                <div class="range-track">
+                  <div class="range-fill" style="left:{p5pct}%; width:{p95pct - p5pct}%; background:{color}"></div>
+                  <div class="range-avg"  style="left:{avgpct}%"></div>
+                </div>
+                <span class="range-ends">{fmt(st.p5)}{unit} – {fmt(st.p95)}{unit}</span>
+              </div>
+            {/if}
+          {/each}
+          <p class="range-legend">
+            <span class="legend-bar" style="background:#94a3b8"></span> 5th–95th percentile &nbsp;
+            <span class="legend-tick"></span> avg
+          </p>
+        </div>
       {:else}
         <p>No still readings found.</p>
       {/if}
@@ -264,4 +291,14 @@
   .pct { color: #94a3b8; }
   .empty { color: #94a3b8; font-style: italic; }
   button { padding: 0.5rem 1rem; cursor: pointer; margin-bottom: 1rem; }
+  .range-chart { margin-top: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  .range-row { display: flex; align-items: center; gap: 0.75rem; }
+  .range-label { width: 110px; font-size: 0.82rem; color: #475569; font-weight: 600; flex-shrink: 0; }
+  .range-track { flex: 1; height: 16px; background: #f1f5f9; border-radius: 8px; position: relative; }
+  .range-fill { position: absolute; top: 0; height: 100%; border-radius: 8px; opacity: 0.7; }
+  .range-avg { position: absolute; top: -3px; width: 3px; height: 22px; background: #1e293b; border-radius: 2px; transform: translateX(-50%); }
+  .range-ends { font-size: 0.78rem; color: #64748b; white-space: nowrap; min-width: 100px; }
+  .range-legend { font-size: 0.75rem; color: #94a3b8; display: flex; align-items: center; gap: 0.25rem; margin-top: 0.25rem; }
+  .legend-bar { display: inline-block; width: 24px; height: 10px; border-radius: 4px; background: #94a3b8; opacity: 0.7; }
+  .legend-tick { display: inline-block; width: 3px; height: 14px; background: #1e293b; border-radius: 2px; margin: 0 0.25rem; }
 </style>
