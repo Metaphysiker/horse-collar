@@ -402,10 +402,10 @@ bool post(String url, String body) {
   if (!ensureWifi()) return false;
   Serial.println("POST " + url);
   HTTPClient http;
+  WiFiClientSecure secureClient;
   if (url.startsWith("https")) {
-    WiFiClientSecure* client = new WiFiClientSecure;
-    client->setInsecure();
-    http.begin(*client, url);
+    secureClient.setInsecure();
+    http.begin(secureClient, url);
   } else {
     http.begin(url);
   }
@@ -414,7 +414,8 @@ bool post(String url, String body) {
   int code = http.POST(body);
   http.end();
   if (code < 0) { Serial.println("POST failed: " + http.errorToString(code)); return false; }
-  return true;
+  Serial.printf("  → %d\n", code);
+  return code >= 200 && code < 300;
 }
 
 // ── Buffer ────────────────────────────────────────────────────────────────────

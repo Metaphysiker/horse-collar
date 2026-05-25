@@ -134,6 +134,11 @@
 {#if readings.length === 0}
     <p>No readings for this day.</p>
   {:else}
+    {@const pageSize = 200}
+    {@const displayed = [...readings].reverse().slice(0, pageSize)}
+    {#if readings.length > pageSize}
+      <p class="limit-note">Showing latest {pageSize} of {readings.length} readings.</p>
+    {/if}
     <table>
       <thead>
         <tr>
@@ -149,7 +154,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each [...readings].reverse() as reading (reading.id)}
+        {#each displayed as reading (reading.id)}
           <SensorReadingRow {reading} ondelete={() => remove(reading.id)} />
         {/each}
       </tbody>
@@ -193,6 +198,7 @@
   .sensor-stat.reason { min-width: auto; }
   .stat-label { font-size: 0.72rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
   .stat-value { font-size: 0.9rem; font-weight: 600; color: #1e293b; margin-top: 0.1rem; }
+  .limit-note { font-size: 0.82rem; color: #94a3b8; margin-bottom: 0.5rem; }
   table { width: 100%; border-collapse: collapse; }
   th, :global(td) { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid #ddd; font-size: 0.9rem; }
   th { font-weight: 600; white-space: nowrap; }
