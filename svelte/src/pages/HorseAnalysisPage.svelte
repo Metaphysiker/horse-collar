@@ -54,13 +54,26 @@
     return (r.pitch != null && r.roll != null) ? Math.sqrt(r.pitch ** 2 + r.roll ** 2) : null;
   }
 
+  function percentile(sorted, p) {
+    const idx = (p / 100) * (sorted.length - 1);
+    const lo = Math.floor(idx), hi = Math.ceil(idx);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+  }
+
   function stats(values) {
-    const v = values.filter(x => x != null);
+    const v = values.filter(x => x != null).sort((a, b) => a - b);
     if (!v.length) return null;
-    const min = Math.min(...v);
-    const max = Math.max(...v);
     const avg = v.reduce((a, b) => a + b, 0) / v.length;
-    return { min, max, avg, count: v.length };
+    const stddev = Math.sqrt(v.reduce((a, b) => a + (b - avg) ** 2, 0) / v.length);
+    return {
+      min:   v[0],
+      max:   v[v.length - 1],
+      avg,
+      stddev,
+      p5:    percentile(v, 5),
+      p95:   percentile(v, 95),
+      count: v.length,
+    };
   }
 
   function fmt(v, dec = 1) { return v == null ? '—' : v.toFixed(dec); }
@@ -167,12 +180,12 @@
           These are the best readings for determining head orientation.
         </p>
         <table>
-          <thead><tr><th>Metric</th><th>Min</th><th>Avg</th><th>Max</th></tr></thead>
+          <thead><tr><th>Metric</th><th>5th %ile</th><th>Avg</th><th>95th %ile</th><th>Stddev</th></tr></thead>
           <tbody>
-            <tr><td>Pitch (sensor)</td><td>{fmt(s.pitch?.min)}°</td><td>{fmt(s.pitch?.avg)}°</td><td>{fmt(s.pitch?.max)}°</td></tr>
-            <tr><td>Roll (sensor)</td><td>{fmt(s.roll?.min)}°</td><td>{fmt(s.roll?.avg)}°</td><td>{fmt(s.roll?.max)}°</td></tr>
-            <tr><td>Tilt</td><td>{fmt(s.tilt?.min)}°</td><td>{fmt(s.tilt?.avg)}°</td><td>{fmt(s.tilt?.max)}°</td></tr>
-            <tr><td>Acceleration</td><td>{fmt(s.accel?.min, 2)}</td><td>{fmt(s.accel?.avg, 2)}</td><td>{fmt(s.accel?.max, 2)}</td></tr>
+            <tr><td>Pitch (sensor)</td><td>{fmt(s.pitch?.p5)}°</td><td>{fmt(s.pitch?.avg)}°</td><td>{fmt(s.pitch?.p95)}°</td><td>±{fmt(s.pitch?.stddev)}°</td></tr>
+            <tr><td>Roll (sensor)</td><td>{fmt(s.roll?.p5)}°</td><td>{fmt(s.roll?.avg)}°</td><td>{fmt(s.roll?.p95)}°</td><td>±{fmt(s.roll?.stddev)}°</td></tr>
+            <tr><td>Tilt</td><td>{fmt(s.tilt?.p5)}°</td><td>{fmt(s.tilt?.avg)}°</td><td>{fmt(s.tilt?.p95)}°</td><td>±{fmt(s.tilt?.stddev)}°</td></tr>
+            <tr><td>Acceleration</td><td>{fmt(s.accel?.p5, 2)}</td><td>{fmt(s.accel?.avg, 2)}</td><td>{fmt(s.accel?.p95, 2)}</td><td>±{fmt(s.accel?.stddev, 2)}</td></tr>
           </tbody>
         </table>
       {:else}
