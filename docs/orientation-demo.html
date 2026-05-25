@@ -22,6 +22,10 @@
     .tilt-color  { color: #22c55e; }
     .explanation { max-width: 500px; margin-top: 1.5rem; padding: 1rem; background: #1e293b; border-radius: 8px; font-size: 0.85rem; line-height: 1.6; color: #cbd5e1; }
     .explanation strong { color: #f1f5f9; }
+    .arcs { display: flex; gap: 2.5rem; margin-top: 1.5rem; align-items: flex-end; flex-wrap: wrap; justify-content: center; }
+    .arc-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+    .arc-title { font-weight: 700; font-size: 0.9rem; }
+    .arc-note  { font-size: 0.75rem; color: #64748b; }
   </style>
 </head>
 <body>
@@ -37,7 +41,7 @@
     </div>
     <div class="control">
       <label>Roll (ear to shoulder)</label>
-      <input type="range" id="roll" min="-90" max="90" value="0">
+      <input type="range" id="roll" min="-180" max="180" value="0">
     </div>
   </div>
 
@@ -53,6 +57,64 @@
     <div class="val">
       <div class="number tilt-color" id="tilt-val">0.0°</div>
       <div class="name">Tilt = √(pitch²+roll²)</div>
+    </div>
+  </div>
+
+  <div class="arcs">
+    <!-- Pitch arc: semicircle -90 to +90 -->
+    <div class="arc-wrap">
+      <svg id="arc-pitch" viewBox="0 0 200 110" width="200" height="110">
+        <!-- track: semicircle bottom half -->
+        <path d="M 10 100 A 90 90 0 0 1 190 100" fill="none" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>
+        <!-- filled arc (pitch) -->
+        <path id="arc-pitch-fill" d="" fill="none" stroke="#3b82f6" stroke-width="6" stroke-linecap="round"/>
+        <!-- needle -->
+        <line id="arc-pitch-needle" x1="100" y1="100" x2="100" y2="10" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="100" cy="100" r="4" fill="#3b82f6"/>
+        <!-- labels -->
+        <text x="4"   y="108" fill="#64748b" font-size="11" font-family="sans-serif">−90°</text>
+        <text x="100" y="13"  fill="#64748b" font-size="11" font-family="sans-serif" text-anchor="middle">0°</text>
+        <text x="196" y="108" fill="#64748b" font-size="11" font-family="sans-serif" text-anchor="end">+90°</text>
+        <text x="100" y="98"  fill="#3b82f6" font-size="13" font-family="sans-serif" text-anchor="middle" font-weight="bold" id="arc-pitch-label">0°</text>
+      </svg>
+      <div class="arc-title pitch-color">Pitch</div>
+      <div class="arc-note">−90° to +90°</div>
+    </div>
+
+    <!-- Roll arc: full circle -180 to +180 -->
+    <div class="arc-wrap">
+      <svg id="arc-roll" viewBox="0 0 200 200" width="200" height="200">
+        <!-- track: full circle -->
+        <circle cx="100" cy="100" r="85" fill="none" stroke="#1e293b" stroke-width="6"/>
+        <!-- filled arc (roll) -->
+        <path id="arc-roll-fill" d="" fill="none" stroke="#f59e0b" stroke-width="6" stroke-linecap="round"/>
+        <!-- needle -->
+        <line id="arc-roll-needle" x1="100" y1="100" x2="100" y2="15" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="100" cy="100" r="4" fill="#f59e0b"/>
+        <!-- labels at 0, ±90, ±180 -->
+        <text x="100" y="11"  fill="#64748b" font-size="11" font-family="sans-serif" text-anchor="middle">0°</text>
+        <text x="193" y="104" fill="#64748b" font-size="11" font-family="sans-serif" text-anchor="start">+90°</text>
+        <text x="100" y="198" fill="#64748b" font-size="11" font-family="sans-serif" text-anchor="middle">±180°</text>
+        <text x="7"   y="104" fill="#64748b" font-size="11" font-family="sans-serif" text-anchor="end">−90°</text>
+        <text x="100" y="104" fill="#f59e0b" font-size="13" font-family="sans-serif" text-anchor="middle" font-weight="bold" id="arc-roll-label">0°</text>
+      </svg>
+      <div class="arc-title roll-color">Roll</div>
+      <div class="arc-note">−180° to +180°</div>
+    </div>
+
+    <!-- Tilt arc: quarter circle 0 to 90 (tilt is always positive) -->
+    <div class="arc-wrap">
+      <svg id="arc-tilt" viewBox="0 0 110 110" width="110" height="110">
+        <path d="M 10 100 A 90 90 0 0 1 100 10" fill="none" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>
+        <path id="arc-tilt-fill" d="" fill="none" stroke="#22c55e" stroke-width="6" stroke-linecap="round"/>
+        <line id="arc-tilt-needle" x1="10" y1="100" x2="10" y2="100" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="10" cy="100" r="4" fill="#22c55e"/>
+        <text x="4"   y="108" fill="#64748b" font-size="11" font-family="sans-serif">0°</text>
+        <text x="106" y="14"  fill="#64748b" font-size="11" font-family="sans-serif" text-anchor="end">90°</text>
+        <text x="55"  y="70"  fill="#22c55e" font-size="13" font-family="sans-serif" text-anchor="middle" font-weight="bold" id="arc-tilt-label">0°</text>
+      </svg>
+      <div class="arc-title tilt-color">Tilt</div>
+      <div class="arc-note">0° to 90°+</div>
     </div>
   </div>
 
@@ -129,6 +191,26 @@
     const rollVal     = document.getElementById('roll-val');
     const tiltVal     = document.getElementById('tilt-val');
 
+    // Arc helpers
+    function polarXY(cx, cy, r, angleDeg) {
+      const a = (angleDeg - 90) * Math.PI / 180;
+      return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    }
+
+    function arcPath(cx, cy, r, startDeg, endDeg) {
+      if (Math.abs(endDeg - startDeg) < 0.1) return '';
+      const large = Math.abs(endDeg - startDeg) > 180 ? 1 : 0;
+      const sweep = endDeg > startDeg ? 1 : 0;
+      const [x1, y1] = polarXY(cx, cy, r, startDeg);
+      const [x2, y2] = polarXY(cx, cy, r, endDeg);
+      return `M ${x1} ${y1} A ${r} ${r} 0 ${large} ${sweep} ${x2} ${y2}`;
+    }
+
+    function setNeedle(el, cx, cy, r, angleDeg) {
+      const [x, y] = polarXY(cx, cy, r, angleDeg);
+      el.setAttribute('x2', x); el.setAttribute('y2', y);
+    }
+
     function update() {
       const p = parseFloat(pitchSlider.value);
       const r = parseFloat(rollSlider.value);
@@ -143,6 +225,27 @@
       pitchVal.textContent = p.toFixed(1) + '°';
       rollVal.textContent  = r.toFixed(1) + '°';
       tiltVal.textContent  = tilt.toFixed(1) + '°';
+
+      // Pitch arc: semicircle. 0° maps to top (270° clock), -90° to left (180°), +90° to right (0°)
+      // Track goes from -90 (left=180°) to +90 (right=0°) via top (270°)
+      // Needle starts at top (0°=top), pitch maps: 0→top, -90→left, +90→right
+      const pitchAngle = -p; // 0° at top, negative pitch → needle goes left
+      document.getElementById('arc-pitch-fill').setAttribute('d', arcPath(100, 100, 90, 0, pitchAngle));
+      setNeedle(document.getElementById('arc-pitch-needle'), 100, 100, 85, pitchAngle);
+      document.getElementById('arc-pitch-label').textContent = p.toFixed(1) + '°';
+
+      // Roll arc: full circle. 0° at top, roll maps: positive → clockwise
+      const rollAngle = r;
+      document.getElementById('arc-roll-fill').setAttribute('d', arcPath(100, 100, 85, 0, rollAngle));
+      setNeedle(document.getElementById('arc-roll-needle'), 100, 100, 80, rollAngle);
+      document.getElementById('arc-roll-label').textContent = r.toFixed(1) + '°';
+
+      // Tilt arc: quarter circle 0→90. 0° at left bottom, 90° at top right.
+      const tiltClamped = Math.min(tilt, 90);
+      const tiltAngle = -90 + tiltClamped; // maps 0→-90 (left), 90→0 (top)
+      document.getElementById('arc-tilt-fill').setAttribute('d', arcPath(10, 100, 90, -90, tiltAngle));
+      setNeedle(document.getElementById('arc-tilt-needle'), 10, 100, 85, tiltAngle);
+      document.getElementById('arc-tilt-label').textContent = tilt.toFixed(1) + '°';
     }
 
     pitchSlider.addEventListener('input', update);
