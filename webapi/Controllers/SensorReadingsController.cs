@@ -14,12 +14,10 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
         var day = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
         var from = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
         var to   = day.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
-        var query = _readings
+        var find = _readings
             .Find(r => r.HorseId == horseId && r.Timestamp >= from && r.Timestamp <= to)
             .SortByDescending(r => r.Timestamp);
-        if (limit is > 0)
-            query = query.Limit(limit.Value);
-        var results = await query.ToListAsync();
+        var results = await (limit is > 0 ? find.Limit(limit.Value) : find).ToListAsync();
         results.Reverse();
         return results;
     }
