@@ -391,7 +391,7 @@
             Threshold: <strong>{extremeSigma}σ</strong>
             = avg ± {extremeSigma}× stddev
           </label>
-          <input type="range" min="1" max="6" step="0.5" bind:value={extremeSigma} />
+          <input type="range" min="1" max="9" step="0.5" bind:value={extremeSigma} />
           <span class="sigma-hint">← more &nbsp; fewer →</span>
         </div>
         {#each [
