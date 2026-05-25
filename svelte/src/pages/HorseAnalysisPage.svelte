@@ -241,24 +241,26 @@
         </p>
         {#each [
           { label: 'Pitch',  color: '#3b82f6', baseline: ss.pitch, all: as.pitch,
+            vals: allReadings.map(r => r.pitch),
             outliers: [{ val: e.maxPitch.pitch, label: 'max' }, { val: e.minPitch.pitch, label: 'min' }] },
           { label: 'Roll',   color: '#f59e0b', baseline: ss.roll,  all: as.roll,
+            vals: allReadings.map(r => r.roll),
             outliers: [{ val: e.maxRoll.roll,   label: 'max' }, { val: e.minRoll.roll,   label: 'min' }] },
           { label: 'Tilt',   color: '#22c55e', baseline: ss.tilt,  all: as.tilt,
+            vals: allReadings.map(r => tilt(r)),
             outliers: [{ val: e.maxTilt.tiltVal, label: 'max' }, { val: e.minTilt.tiltVal, label: 'min' }] },
         ] as row}
           {#if row.baseline && row.all}
             {@const span = row.all.max - row.all.min || 1}
             {@const pct  = v => ((v - row.all.min) / span * 100).toFixed(2)}
             {@const bw   = pct(row.baseline.p95) - pct(row.baseline.p5)}
+            {@const nOut = row.vals.filter(v => v != null && (v < row.baseline.p5 || v > row.baseline.p95)).length}
+            {@const nTotal = row.vals.filter(v => v != null).length}
             <div class="ol-row">
               <span class="ol-label">{row.label}</span>
               <div class="ol-track">
-                <!-- baseline band -->
                 <div class="ol-band" style="left:{pct(row.baseline.p5)}%; width:{bw}%; background:{row.color}"></div>
-                <!-- avg tick -->
                 <div class="ol-avg" style="left:{pct(row.baseline.avg)}%"></div>
-                <!-- outlier dots -->
                 {#each row.outliers as o}
                   {#if o.val != null}
                     <div class="ol-dot" style="left:{pct(o.val)}%" title="{o.label}: {fmt(o.val)}°">
@@ -271,13 +273,17 @@
                 <span>{fmt(row.all.min)}°</span>
                 <span>{fmt(row.all.max)}°</span>
               </div>
+              <span class="ol-count" title="readings outside baseline band">
+                {nOut} <span class="ol-count-pct">({(nOut/nTotal*100).toFixed(0)}%)</span>
+              </span>
             </div>
           {/if}
         {/each}
         <p class="ol-legend">
           <span class="legend-band"></span> baseline (still, p5–p95) &nbsp;
           <span class="legend-avgline"></span> avg &nbsp;
-          <span class="legend-dot"></span> outlier (min/max of all)
+          <span class="legend-dot"></span> min/max &nbsp;
+          <span style="color:#dc2626; font-weight:600;">count</span> = readings outside baseline band
         </p>
       </section>
     {/if}
@@ -361,6 +367,8 @@
   .ol-dot { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 12px; height: 12px; background: #dc2626; border: 2px solid white; border-radius: 50%; cursor: default; }
   .ol-dot-label { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font-size: 0.7rem; color: #dc2626; white-space: nowrap; font-weight: 600; }
   .ol-ends { display: flex; justify-content: space-between; width: 90px; font-size: 0.75rem; color: #94a3b8; flex-shrink: 0; }
+  .ol-count { font-size: 0.82rem; font-weight: 600; color: #dc2626; min-width: 70px; text-align: right; flex-shrink: 0; }
+  .ol-count-pct { font-weight: 400; color: #94a3b8; }
   .ol-legend { font-size: 0.75rem; color: #94a3b8; display: flex; align-items: center; gap: 0.4rem; margin-top: 0.5rem; flex-wrap: wrap; }
   .legend-band { display: inline-block; width: 24px; height: 10px; border-radius: 4px; background: #64748b; opacity: 0.35; }
   .legend-avgline { display: inline-block; width: 3px; height: 14px; background: #1e293b; border-radius: 2px; }
