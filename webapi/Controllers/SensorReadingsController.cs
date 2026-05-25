@@ -33,7 +33,7 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
         {
             var config = await _configs.Find(c => c.HorseId == horseId).FirstOrDefaultAsync();
             if (config?.NtfyEnabled == true)
-                await ntfy.NotifyAsync(horseId, reading.State, $"[Firmware] {reading.AlertReason ?? reading.State.ToString()}");
+                await ntfy.NotifyAsync(horseId, reading.State, reading.AlertReason ?? reading.State.ToString());
         }
 
         return Created();
@@ -51,7 +51,7 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
         {
             var alert = readings.LastOrDefault(r => r.State is HorseState.Alert or HorseState.Emergency);
             if (alert is not null)
-                await ntfy.NotifyAsync(horseId, alert.State, $"[Firmware] {alert.AlertReason ?? alert.State.ToString()}");
+                await ntfy.NotifyAsync(horseId, alert.State, alert.AlertReason ?? alert.State.ToString());
         }
 
         if (config?.LyingDownAlertEnabled == true)

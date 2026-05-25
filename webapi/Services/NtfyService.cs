@@ -10,13 +10,13 @@ public class NtfyService(HttpClient http, IConfiguration config)
     {
         var reasonText = reason switch
         {
-            "BaselineShift"    => "Unusual movement or orientation change detected.",
-            "SuddenFall"       => "Sudden fall — was rolling, now tilted and still.",
-            "ActivityCollapse" => "Horse stopped moving abruptly after activity.",
-            "ConfirmedFall"    => "Fall confirmed — horse went from upright to lying.",
-            "ColicRolling"     => "Horse is rolling repeatedly (possible colic).",
+            "BaselineShift"    => "[Firmware] Unusual movement or orientation change detected.",
+            "SuddenFall"       => "[Firmware] Sudden fall — was rolling, now tilted and still.",
+            "ActivityCollapse" => "[Firmware] Horse stopped moving abruptly after activity.",
+            "ConfirmedFall"    => "[Firmware] Fall confirmed — horse went from upright to lying.",
+            "ColicRolling"     => "[Firmware] Horse is rolling repeatedly (possible colic).",
             "TestNotification" => "This is a test notification from Horse Collar.",
-            _                  => "Unknown reason."
+            _                  => reason ?? "Unknown reason."
         };
 
         var (title, message, priority, tag) = state switch
