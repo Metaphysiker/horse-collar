@@ -1,7 +1,0 @@
-Deployment Date: 2026-05-25_12-28-49
-Branch: dev
-Commit: 8f8e50f199341323e925afcae351fbccdfabe095
-Commit Short: 8f8e50f
-Message: Add limit for SensorReadings.
-Deployed By: sandro
-Deployed From: sandrot14

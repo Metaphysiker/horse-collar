@@ -141,6 +141,8 @@
           <th>State</th>
           <th>Pitch</th>
           <th>Roll</th>
+          <th>Side</th>
+          <th>Horse Roll~</th>
           <th>Tilt</th>
           <th>Accel</th>
           <th>Gyro</th>

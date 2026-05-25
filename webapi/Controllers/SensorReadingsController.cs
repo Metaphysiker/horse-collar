@@ -54,6 +54,33 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
                 await ntfy.NotifyAsync(horseId, alert.State, alert.AlertReason ?? "Unknown");
         }
 
+        if (config?.LyingDownAlertEnabled == true)
+        {
+            var lyingDown = readings.FirstOrDefault(r =>
+                Math.Sqrt((double)(r.Pitch * r.Pitch + r.Roll * r.Roll)) > 90);
+            if (lyingDown is not null)
+            {
+                var side = lyingDown.Roll > 0 ? "left side" : "right side";
+                await ntfy.NotifyAsync(horseId, HorseState.Alert, $"LyingDown — {side} (tilt {Math.Sqrt((double)(lyingDown.Pitch * lyingDown.Pitch + lyingDown.Roll * lyingDown.Roll)):F0}°)");
+            }
+        }
+
+        if (config?.HighRollAlertEnabled == true)
+        {
+            // Sensor roll calibration: standing = +5°, left 90° = +72°, right 90° = -65°
+            // Horse roll 45° left  → sensor roll ≈ +38.5°
+            // Horse roll 45° right → sensor roll ≈ -30°
+            var highRoll = readings.FirstOrDefault(r => r.Roll > 38.5f || r.Roll < -30f);
+            if (highRoll is not null)
+            {
+                var horseRoll = highRoll.Roll >= 5
+                    ? (highRoll.Roll - 5) / 67f * 90f
+                    : (highRoll.Roll - 5) / 70f * 90f;
+                var side = horseRoll > 0 ? "left" : "right";
+                await ntfy.NotifyAsync(horseId, HorseState.Alert, $"High roll — {side} side (horse roll ~{Math.Abs(horseRoll):F0}°)");
+            }
+        }
+
         return Created();
     }
 

@@ -106,6 +106,22 @@
           <input type="checkbox" bind:checked={config.ntfyEnabled} />
         </label>
 
+        <label class="toggle-row">
+          <span>
+            Lying-down alert
+            <span class="hint">Send a push notification when tilt exceeds 90° (horse on its side). Independent of the general ntfy toggle.</span>
+          </span>
+          <input type="checkbox" bind:checked={config.lyingDownAlertEnabled} />
+        </label>
+
+        <label class="toggle-row">
+          <span>
+            High roll alert
+            <span class="hint">Send a push notification when estimated horse roll exceeds 45° to either side.</span>
+          </span>
+          <input type="checkbox" bind:checked={config.highRollAlertEnabled} />
+        </label>
+
       </section>
 
       <button type="submit" class="save" disabled={loading}>
