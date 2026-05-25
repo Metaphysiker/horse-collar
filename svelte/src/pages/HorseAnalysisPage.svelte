@@ -78,6 +78,19 @@
 
   function fmt(v, dec = 1) { return v == null ? '—' : v.toFixed(dec); }
 
+  function histogram(values, binSize = 5) {
+    const v = values.filter(x => x != null);
+    if (!v.length) return [];
+    const mn = Math.floor(Math.min(...v) / binSize) * binSize;
+    const mx = Math.ceil(Math.max(...v) / binSize) * binSize;
+    const bins = [];
+    for (let lo = mn; lo < mx; lo += binSize) {
+      const count = v.filter(x => x >= lo && x < lo + binSize).length;
+      bins.push({ lo, hi: lo + binSize, count });
+    }
+    return bins;
+  }
+
   // ── Computed analyses ────────────────────────────────────────────────────────
 
   const stillReadings = $derived(
@@ -288,6 +301,40 @@
       </section>
     {/if}
 
+    <!-- ── Outlier distribution ───────────────────────────────────────────── -->
+    {#if stillStats()}
+      {@const ss = stillStats()}
+      <section>
+        <h2>Outlier Distribution</h2>
+        <p class="desc">All readings bucketed in 5° bins. Red = outside still-period baseline. Gray = within baseline.</p>
+        {#each [
+          { label: 'Pitch', vals: allReadings.map(r => r.pitch),  baseline: ss.pitch, unit: '°' },
+          { label: 'Roll',  vals: allReadings.map(r => r.roll),   baseline: ss.roll,  unit: '°' },
+          { label: 'Tilt',  vals: allReadings.map(r => tilt(r)),  baseline: ss.tilt,  unit: '°' },
+        ] as row}
+          {#if row.baseline}
+            {@const bins = histogram(row.vals, 5)}
+            {@const maxCount = Math.max(...bins.map(b => b.count))}
+            <div class="histo-group">
+              <div class="histo-title">{row.label}</div>
+              {#each bins as bin}
+                {#if bin.count > 0}
+                  {@const isOutlier = bin.hi <= row.baseline.p5 || bin.lo >= row.baseline.p95}
+                  <div class="histo-row">
+                    <span class="histo-label">{bin.lo >= 0 ? '+' : ''}{bin.lo}° to {bin.hi >= 0 ? '+' : ''}{bin.hi}°</span>
+                    <div class="histo-track">
+                      <div class="histo-bar" style="width:{bin.count / maxCount * 100}%; background:{isOutlier ? '#dc2626' : '#94a3b8'}"></div>
+                    </div>
+                    <span class="histo-count" style="color:{isOutlier ? '#dc2626' : '#64748b'}">{bin.count}</span>
+                  </div>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+        {/each}
+      </section>
+    {/if}
+
     <!-- ── Extreme points ────────────────────────────────────────────────── -->
     <section>
       <h2>Extreme Points</h2>
@@ -373,6 +420,13 @@
   .legend-band { display: inline-block; width: 24px; height: 10px; border-radius: 4px; background: #64748b; opacity: 0.35; }
   .legend-avgline { display: inline-block; width: 3px; height: 14px; background: #1e293b; border-radius: 2px; }
   .legend-dot { display: inline-block; width: 10px; height: 10px; background: #dc2626; border: 2px solid white; border-radius: 50%; outline: 1px solid #dc2626; }
+  .histo-group { margin-bottom: 1.5rem; }
+  .histo-title { font-size: 0.82rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
+  .histo-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.2rem; }
+  .histo-label { width: 130px; font-size: 0.78rem; color: #64748b; font-family: monospace; flex-shrink: 0; text-align: right; }
+  .histo-track { flex: 1; height: 14px; background: #f1f5f9; border-radius: 4px; overflow: hidden; }
+  .histo-bar { height: 100%; border-radius: 4px; transition: width 0.3s; }
+  .histo-count { width: 45px; font-size: 0.78rem; font-weight: 600; text-align: right; flex-shrink: 0; }
   .range-chart { margin-top: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
   .range-row { display: flex; align-items: center; gap: 0.75rem; }
   .range-label { width: 110px; font-size: 0.82rem; color: #475569; font-weight: 600; flex-shrink: 0; }
