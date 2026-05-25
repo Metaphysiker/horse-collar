@@ -113,6 +113,15 @@
     };
   });
 
+  const allStats = $derived(() => {
+    if (!allReadings.length) return null;
+    return {
+      pitch: stats(allReadings.map(r => r.pitch)),
+      roll:  stats(allReadings.map(r => r.roll)),
+      tilt:  stats(allReadings.map(r => tilt(r))),
+    };
+  });
+
   const activity = $derived(() => {
     if (!allReadings.length) return null;
     const counts = {};
@@ -220,6 +229,59 @@
       {/if}
     </section>
 
+    <!-- ── Baseline vs Outliers ───────────────────────────────────────────── -->
+    {#if stillStats() && allStats() && extremes()}
+      {@const ss = stillStats()}
+      {@const as = allStats()}
+      {@const e  = extremes()}
+      <section>
+        <h2>Baseline vs Outliers</h2>
+        <p class="desc">
+          Green band = still-period baseline (5th–95th %). Dots = extreme values across all readings. Track = full observed range.
+        </p>
+        {#each [
+          { label: 'Pitch',  color: '#3b82f6', baseline: ss.pitch, all: as.pitch,
+            outliers: [{ val: e.maxPitch.pitch, label: 'max' }, { val: e.minPitch.pitch, label: 'min' }] },
+          { label: 'Roll',   color: '#f59e0b', baseline: ss.roll,  all: as.roll,
+            outliers: [{ val: e.maxRoll.roll,   label: 'max' }, { val: e.minRoll.roll,   label: 'min' }] },
+          { label: 'Tilt',   color: '#22c55e', baseline: ss.tilt,  all: as.tilt,
+            outliers: [{ val: e.maxTilt.tiltVal, label: 'max' }, { val: e.minTilt.tiltVal, label: 'min' }] },
+        ] as row}
+          {#if row.baseline && row.all}
+            {@const span = row.all.max - row.all.min || 1}
+            {@const pct  = v => ((v - row.all.min) / span * 100).toFixed(2)}
+            {@const bw   = pct(row.baseline.p95) - pct(row.baseline.p5)}
+            <div class="ol-row">
+              <span class="ol-label">{row.label}</span>
+              <div class="ol-track">
+                <!-- baseline band -->
+                <div class="ol-band" style="left:{pct(row.baseline.p5)}%; width:{bw}%; background:{row.color}"></div>
+                <!-- avg tick -->
+                <div class="ol-avg" style="left:{pct(row.baseline.avg)}%"></div>
+                <!-- outlier dots -->
+                {#each row.outliers as o}
+                  {#if o.val != null}
+                    <div class="ol-dot" style="left:{pct(o.val)}%" title="{o.label}: {fmt(o.val)}°">
+                      <span class="ol-dot-label">{fmt(o.val)}°</span>
+                    </div>
+                  {/if}
+                {/each}
+              </div>
+              <div class="ol-ends">
+                <span>{fmt(row.all.min)}°</span>
+                <span>{fmt(row.all.max)}°</span>
+              </div>
+            </div>
+          {/if}
+        {/each}
+        <p class="ol-legend">
+          <span class="legend-band"></span> baseline (still, p5–p95) &nbsp;
+          <span class="legend-avgline"></span> avg &nbsp;
+          <span class="legend-dot"></span> outlier (min/max of all)
+        </p>
+      </section>
+    {/if}
+
     <!-- ── Extreme points ────────────────────────────────────────────────── -->
     <section>
       <h2>Extreme Points</h2>
@@ -291,6 +353,18 @@
   .pct { color: #94a3b8; }
   .empty { color: #94a3b8; font-style: italic; }
   button { padding: 0.5rem 1rem; cursor: pointer; margin-bottom: 1rem; }
+  .ol-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
+  .ol-label { width: 50px; font-size: 0.82rem; font-weight: 600; color: #475569; flex-shrink: 0; }
+  .ol-track { flex: 1; height: 20px; background: #f1f5f9; border-radius: 10px; position: relative; }
+  .ol-band { position: absolute; top: 0; height: 100%; border-radius: 10px; opacity: 0.35; }
+  .ol-avg { position: absolute; top: -4px; width: 3px; height: 28px; background: #1e293b; border-radius: 2px; transform: translateX(-50%); }
+  .ol-dot { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 12px; height: 12px; background: #dc2626; border: 2px solid white; border-radius: 50%; cursor: default; }
+  .ol-dot-label { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font-size: 0.7rem; color: #dc2626; white-space: nowrap; font-weight: 600; }
+  .ol-ends { display: flex; justify-content: space-between; width: 90px; font-size: 0.75rem; color: #94a3b8; flex-shrink: 0; }
+  .ol-legend { font-size: 0.75rem; color: #94a3b8; display: flex; align-items: center; gap: 0.4rem; margin-top: 0.5rem; flex-wrap: wrap; }
+  .legend-band { display: inline-block; width: 24px; height: 10px; border-radius: 4px; background: #64748b; opacity: 0.35; }
+  .legend-avgline { display: inline-block; width: 3px; height: 14px; background: #1e293b; border-radius: 2px; }
+  .legend-dot { display: inline-block; width: 10px; height: 10px; background: #dc2626; border: 2px solid white; border-radius: 50%; outline: 1px solid #dc2626; }
   .range-chart { margin-top: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
   .range-row { display: flex; align-items: center; gap: 0.75rem; }
   .range-label { width: 110px; font-size: 0.82rem; color: #475569; font-weight: 600; flex-shrink: 0; }
