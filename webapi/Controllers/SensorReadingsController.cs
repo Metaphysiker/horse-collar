@@ -70,12 +70,13 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
             // Sensor roll calibration: standing = +5°, left 90° = +72°, right 90° = -65°
             // Horse roll 45° left  → sensor roll ≈ +38.5°
             // Horse roll 45° right → sensor roll ≈ -30°
-            var highRoll = readings.FirstOrDefault(r => r.Roll > 38.5f || r.Roll < -30f);
+            var baseline = config.RollBaseline;
+            var highRoll = readings.FirstOrDefault(r => r.Roll > baseline + 33.5f || r.Roll < baseline - 35f);
             if (highRoll is not null)
             {
-                var horseRoll = highRoll.Roll >= 5
-                    ? (highRoll.Roll - 5) / 67f * 90f
-                    : (highRoll.Roll - 5) / 70f * 90f;
+                var horseRoll = highRoll.Roll >= baseline
+                    ? (highRoll.Roll - baseline) / 67f * 90f
+                    : (highRoll.Roll - baseline) / 70f * 90f;
                 var side = horseRoll > 0 ? "left" : "right";
                 await ntfy.NotifyAsync(horseId, HorseState.Alert, $"[HighRoll] {side} side (horse roll ~{Math.Abs(horseRoll):F0}°)");
             }

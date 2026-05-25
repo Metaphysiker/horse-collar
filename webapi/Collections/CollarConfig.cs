@@ -17,6 +17,7 @@ public class CollarConfig
     public bool NtfyEnabled { get; set; } = false;
     public bool LyingDownAlertEnabled { get; set; } = false;
     public bool HighRollAlertEnabled { get; set; } = false;
+    public float RollBaseline { get; set; } = 5.0f;
     public float ChangeAccel { get; set; } = 1.5f;
     public float ChangePitch { get; set; } = 25.0f;
     public float ChangeRoll { get; set; } = 25.0f;

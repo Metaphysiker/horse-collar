@@ -122,6 +122,12 @@
           <input type="checkbox" bind:checked={config.highRollAlertEnabled} />
         </label>
 
+        <label>
+          Roll baseline (sensor °)
+          <span class="hint">Sensor roll when the horse is standing normally. Check recent Standing readings and enter the average roll. Default 5 (original calibration).</span>
+          <input type="number" min="-90" max="90" step="0.5" bind:value={config.rollBaseline} />
+        </label>
+
       </section>
 
       <button type="submit" class="save" disabled={loading}>
