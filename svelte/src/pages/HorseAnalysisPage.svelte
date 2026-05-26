@@ -4,10 +4,12 @@
   import { pop } from 'svelte-spa-router';
   import { horses } from '../services/horses.js';
   import { sensorReadings } from '../services/sensorReadings.js';
+  import { collarConfig } from '../services/collarConfig.js';
 
   let { params = {} } = $props();
 
   let horse       = $state(null);
+  let config      = $state(null);
   let loading     = $state(false);
   let allReadings = $state([]);
 
@@ -19,14 +21,17 @@
   }
 
   let fromDate = $state(yesterdayString());
-  let fromTime = $state('00:00');
+  let fromTime = $state('20:00');
   let toDate   = $state(todayString());
-  let toTime   = $state('23:59');
+  let toTime   = $state('04:00');
   let stillThreshold   = $state(0.2);
   let extremeSigma     = $state(3);
 
   onMount(async () => {
-    horse = await horses.getById(params.id);
+    [horse, config] = await Promise.all([
+      horses.getById(params.id),
+      collarConfig.get(params.id).catch(() => null),
+    ]);
   });
 
   async function load() {
@@ -53,6 +58,15 @@
 
   function tilt(r) {
     return (r.pitch != null && r.roll != null) ? Math.sqrt(r.pitch ** 2 + r.roll ** 2) : null;
+  }
+
+  function horseRoll(r) {
+    if (r.roll == null) return null;
+    const baseline = config?.rollBaseline ?? 5;
+    const deg = r.roll >= baseline
+      ? (r.roll - baseline) / 67 * 90
+      : (r.roll - baseline) / 70 * 90;
+    return Math.max(-90, Math.min(90, deg));
   }
 
   function percentile(sorted, p) {
@@ -102,11 +116,12 @@
     const s = stillReadings;
     if (!s.length) return null;
     return {
-      count:  s.length,
-      pitch:  stats(s.map(r => r.pitch)),
-      roll:   stats(s.map(r => r.roll)),
-      tilt:   stats(s.map(r => tilt(r))),
-      accel:  stats(s.map(r => r.acceleration)),
+      count:     s.length,
+      pitch:     stats(s.map(r => r.pitch)),
+      roll:      stats(s.map(r => r.roll)),
+      tilt:      stats(s.map(r => tilt(r))),
+      horseRoll: stats(s.map(r => horseRoll(r))),
+      accel:     stats(s.map(r => r.acceleration)),
     };
   });
 
@@ -115,24 +130,28 @@
     const withTilt = allReadings.map(r => ({ ...r, tiltVal: tilt(r) }));
     const pick = (arr, fn) => arr.reduce((best, r) => fn(r) > fn(best) ? r : best);
     const pickMin = (arr, fn) => arr.reduce((best, r) => fn(r) < fn(best) ? r : best);
+    const withHR = allReadings.map(r => ({ ...r, hrVal: horseRoll(r) }));
     return {
-      maxTilt:  pick(withTilt.filter(r => r.tiltVal != null), r => r.tiltVal),
-      minTilt:  pickMin(withTilt.filter(r => r.tiltVal != null), r => r.tiltVal),
-      maxAccel: pick(allReadings.filter(r => r.acceleration != null), r => r.acceleration),
-      maxGyro:  pick(allReadings.filter(r => r.angularVelocity != null), r => r.angularVelocity),
-      maxPitch: pick(allReadings.filter(r => r.pitch != null), r => r.pitch),
-      minPitch: pickMin(allReadings.filter(r => r.pitch != null), r => r.pitch),
-      maxRoll:  pick(allReadings.filter(r => r.roll != null), r => r.roll),
-      minRoll:  pickMin(allReadings.filter(r => r.roll != null), r => r.roll),
+      maxTilt:      pick(withTilt.filter(r => r.tiltVal != null), r => r.tiltVal),
+      minTilt:      pickMin(withTilt.filter(r => r.tiltVal != null), r => r.tiltVal),
+      maxAccel:     pick(allReadings.filter(r => r.acceleration != null), r => r.acceleration),
+      maxGyro:      pick(allReadings.filter(r => r.angularVelocity != null), r => r.angularVelocity),
+      maxPitch:     pick(allReadings.filter(r => r.pitch != null), r => r.pitch),
+      minPitch:     pickMin(allReadings.filter(r => r.pitch != null), r => r.pitch),
+      maxRoll:      pick(allReadings.filter(r => r.roll != null), r => r.roll),
+      minRoll:      pickMin(allReadings.filter(r => r.roll != null), r => r.roll),
+      maxHorseRoll: pick(withHR.filter(r => r.hrVal != null), r => r.hrVal),
+      minHorseRoll: pickMin(withHR.filter(r => r.hrVal != null), r => r.hrVal),
     };
   });
 
   const allStats = $derived(() => {
     if (!allReadings.length) return null;
     return {
-      pitch: stats(allReadings.map(r => r.pitch)),
-      roll:  stats(allReadings.map(r => r.roll)),
-      tilt:  stats(allReadings.map(r => tilt(r))),
+      pitch:     stats(allReadings.map(r => r.pitch)),
+      roll:      stats(allReadings.map(r => r.roll)),
+      tilt:      stats(allReadings.map(r => tilt(r))),
+      horseRoll: stats(allReadings.map(r => horseRoll(r))),
     };
   });
 
@@ -208,15 +227,17 @@
             <tr><td>Pitch (sensor)</td><td>{fmt(s.pitch?.p5)}°</td><td>{fmt(s.pitch?.avg)}°</td><td>{fmt(s.pitch?.p95)}°</td><td>±{fmt(s.pitch?.stddev)}°</td></tr>
             <tr><td>Roll (sensor)</td><td>{fmt(s.roll?.p5)}°</td><td>{fmt(s.roll?.avg)}°</td><td>{fmt(s.roll?.p95)}°</td><td>±{fmt(s.roll?.stddev)}°</td></tr>
             <tr><td>Tilt</td><td>{fmt(s.tilt?.p5)}°</td><td>{fmt(s.tilt?.avg)}°</td><td>{fmt(s.tilt?.p95)}°</td><td>±{fmt(s.tilt?.stddev)}°</td></tr>
+            <tr><td>Horse Roll~</td><td>{fmt(s.horseRoll?.p5)}°</td><td>{fmt(s.horseRoll?.avg)}°</td><td>{fmt(s.horseRoll?.p95)}°</td><td>±{fmt(s.horseRoll?.stddev)}°</td></tr>
             <tr><td>Acceleration</td><td>{fmt(s.accel?.p5, 2)}</td><td>{fmt(s.accel?.avg, 2)}</td><td>{fmt(s.accel?.p95, 2)}</td><td>±{fmt(s.accel?.stddev, 2)}</td></tr>
           </tbody>
         </table>
 
         <div class="range-chart">
           {#each [
-            { label: 'Pitch (sensor)', st: s.pitch, unit: '°', color: '#3b82f6' },
-            { label: 'Roll (sensor)',  st: s.roll,  unit: '°', color: '#f59e0b' },
-            { label: 'Tilt',          st: s.tilt,  unit: '°', color: '#22c55e' },
+            { label: 'Pitch (sensor)', st: s.pitch,     unit: '°', color: '#3b82f6' },
+            { label: 'Roll (sensor)',  st: s.roll,      unit: '°', color: '#f59e0b' },
+            { label: 'Tilt',          st: s.tilt,      unit: '°', color: '#22c55e' },
+            { label: 'Horse Roll~',   st: s.horseRoll, unit: '°', color: '#7c3aed' },
           ] as { label, st, unit, color }}
             {#if st}
               {@const span = st.max - st.min || 1}
@@ -254,15 +275,18 @@
           Green band = still-period baseline (5th–95th %). Dots = extreme values across all readings. Track = full observed range.
         </p>
         {#each [
-          { label: 'Pitch',  color: '#3b82f6', baseline: ss.pitch, all: as.pitch,
+          { label: 'Pitch',      color: '#3b82f6', baseline: ss.pitch,     all: as.pitch,
             vals: allReadings.map(r => r.pitch),
             outliers: [{ val: e.maxPitch.pitch, label: 'max' }, { val: e.minPitch.pitch, label: 'min' }] },
-          { label: 'Roll',   color: '#f59e0b', baseline: ss.roll,  all: as.roll,
+          { label: 'Roll',       color: '#f59e0b', baseline: ss.roll,      all: as.roll,
             vals: allReadings.map(r => r.roll),
             outliers: [{ val: e.maxRoll.roll,   label: 'max' }, { val: e.minRoll.roll,   label: 'min' }] },
-          { label: 'Tilt',   color: '#22c55e', baseline: ss.tilt,  all: as.tilt,
+          { label: 'Tilt',       color: '#22c55e', baseline: ss.tilt,      all: as.tilt,
             vals: allReadings.map(r => tilt(r)),
             outliers: [{ val: e.maxTilt.tiltVal, label: 'max' }, { val: e.minTilt.tiltVal, label: 'min' }] },
+          { label: 'Horse Roll~', color: '#7c3aed', baseline: ss.horseRoll, all: as.horseRoll,
+            vals: allReadings.map(r => horseRoll(r)),
+            outliers: [{ val: e.maxHorseRoll.hrVal, label: 'max' }, { val: e.minHorseRoll.hrVal, label: 'min' }] },
         ] as row}
           {#if row.baseline && row.all}
             {@const span = row.all.max - row.all.min || 1}
@@ -309,9 +333,10 @@
         <h2>Outlier Distribution</h2>
         <p class="desc">All readings bucketed in 5° bins. Red = outside still-period baseline. Gray = within baseline.</p>
         {#each [
-          { label: 'Pitch', vals: allReadings.map(r => r.pitch),  baseline: ss.pitch, unit: '°' },
-          { label: 'Roll',  vals: allReadings.map(r => r.roll),   baseline: ss.roll,  unit: '°' },
-          { label: 'Tilt',  vals: allReadings.map(r => tilt(r)),  baseline: ss.tilt,  unit: '°' },
+          { label: 'Pitch',       vals: allReadings.map(r => r.pitch),      baseline: ss.pitch,     unit: '°' },
+          { label: 'Roll',        vals: allReadings.map(r => r.roll),        baseline: ss.roll,      unit: '°' },
+          { label: 'Tilt',        vals: allReadings.map(r => tilt(r)),       baseline: ss.tilt,      unit: '°' },
+          { label: 'Horse Roll~', vals: allReadings.map(r => horseRoll(r)),  baseline: ss.horseRoll, unit: '°' },
         ] as row}
           {#if row.baseline}
             {@const bins = histogram(row.vals, 5)}
@@ -348,9 +373,10 @@
         <h2>Outlier Timeline</h2>
         <p class="desc">Each tick = one reading outside the still-period baseline. Clusters mean repeated outliers close together in time.</p>
         {#each [
-          { label: 'Pitch', baseline: ss.pitch, getVal: r => r.pitch },
-          { label: 'Roll',  baseline: ss.roll,  getVal: r => r.roll  },
-          { label: 'Tilt',  baseline: ss.tilt,  getVal: r => tilt(r) },
+          { label: 'Pitch',       baseline: ss.pitch,     getVal: r => r.pitch      },
+          { label: 'Roll',        baseline: ss.roll,       getVal: r => r.roll       },
+          { label: 'Tilt',        baseline: ss.tilt,       getVal: r => tilt(r)      },
+          { label: 'Horse Roll~', baseline: ss.horseRoll,  getVal: r => horseRoll(r) },
         ] as row}
           {#if row.baseline}
             {@const outs = allReadings.filter(r => {
@@ -395,9 +421,10 @@
           <span class="sigma-hint">← more &nbsp; fewer →</span>
         </div>
         {#each [
-          { label: 'Pitch', baseline: ss.pitch, getVal: r => r.pitch },
-          { label: 'Roll',  baseline: ss.roll,  getVal: r => r.roll  },
-          { label: 'Tilt',  baseline: ss.tilt,  getVal: r => tilt(r) },
+          { label: 'Pitch',       baseline: ss.pitch,     getVal: r => r.pitch      },
+          { label: 'Roll',        baseline: ss.roll,       getVal: r => r.roll       },
+          { label: 'Tilt',        baseline: ss.tilt,       getVal: r => tilt(r)      },
+          { label: 'Horse Roll~', baseline: ss.horseRoll,  getVal: r => horseRoll(r) },
         ] as row}
           {#if row.baseline}
             {@const lo = row.baseline.avg - extremeSigma * row.baseline.stddev}
@@ -498,7 +525,7 @@
   .empty { color: #94a3b8; font-style: italic; }
   button { padding: 0.5rem 1rem; cursor: pointer; margin-bottom: 1rem; }
   .ol-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
-  .ol-label { width: 50px; font-size: 0.82rem; font-weight: 600; color: #475569; flex-shrink: 0; }
+  .ol-label { width: 80px; font-size: 0.82rem; font-weight: 600; color: #475569; flex-shrink: 0; }
   .ol-track { flex: 1; height: 20px; background: #f1f5f9; border-radius: 10px; position: relative; }
   .ol-band { position: absolute; top: 0; height: 100%; border-radius: 10px; opacity: 0.35; }
   .ol-avg { position: absolute; top: -4px; width: 3px; height: 28px; background: #1e293b; border-radius: 2px; transform: translateX(-50%); }
@@ -512,17 +539,17 @@
   .legend-avgline { display: inline-block; width: 3px; height: 14px; background: #1e293b; border-radius: 2px; }
   .legend-dot { display: inline-block; width: 10px; height: 10px; background: #dc2626; border: 2px solid white; border-radius: 50%; outline: 1px solid #dc2626; }
   .zt-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem; }
-  .zt-label { width: 50px; font-size: 0.82rem; font-weight: 600; color: #475569; flex-shrink: 0; }
+  .zt-label { width: 80px; font-size: 0.82rem; font-weight: 600; color: #475569; flex-shrink: 0; }
   .zt-track { flex: 1; height: 28px; background: #f1f5f9; border-radius: 4px; position: relative; }
   .zt-tick { position: absolute; top: 3px; width: 2px; height: 22px; background: #dc2626; border-radius: 1px; transform: translateX(-50%); opacity: 0.7; }
   .zt-tick-extreme { background: #7c3aed; opacity: 0.9; }
   .zt-count { width: 45px; font-size: 0.82rem; font-weight: 600; color: #dc2626; text-align: right; flex-shrink: 0; }
-  .zt-axis { display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem; padding: 0 0 0 60px; }
+  .zt-axis { display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem; padding: 0 0 0 90px; }
   .sigma-control { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
   .sigma-control label { font-size: 0.88rem; color: #475569; }
   .sigma-control input { width: 160px; accent-color: #7c3aed; }
   .sigma-hint { font-size: 0.75rem; color: #94a3b8; }
-  .sigma-range { font-size: 0.75rem; color: #94a3b8; margin: -0.3rem 0 0.6rem 60px; }
+  .sigma-range { font-size: 0.75rem; color: #94a3b8; margin: -0.3rem 0 0.6rem 90px; }
   .histo-group { margin-bottom: 1.5rem; }
   .histo-title { font-size: 0.82rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
   .histo-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.2rem; }
