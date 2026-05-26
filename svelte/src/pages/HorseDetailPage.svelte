@@ -58,15 +58,15 @@
       <button onclick={() => push(`/horses/${params.id}/actions`)}>Device Actions</button>
     </div>
     <div class="device-status">
-      <span class="status-label">Battery</span>
+      <span class="status-label">Batterie</span>
       {#if status}
         <span class="battery-bar">
           <span class="battery-fill" style="width: {status.batteryPercent}%; background: {status.batteryPercent < 20 ? '#ef4444' : status.batteryPercent < 50 ? '#f59e0b' : '#22c55e'}"></span>
         </span>
         <span class="battery-text">{status.batteryPercent}% &nbsp;·&nbsp; {status.batteryVoltage.toFixed(2)} V</span>
-        <span class="status-time">Last seen: {formatDate(status.timestamp)}</span>
+        <span class="status-time">Zuletzt gesehen: {formatDate(status.timestamp)}</span>
       {:else}
-        <span class="no-device">No device data available yet</span>
+        <span class="no-device">Noch keine Gerätedaten verfügbar</span>
       {/if}
     </div>
   {/if}
