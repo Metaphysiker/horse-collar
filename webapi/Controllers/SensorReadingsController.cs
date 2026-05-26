@@ -56,8 +56,8 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
 
         if (config?.LyingDownAlertEnabled == true)
         {
-            var lyingDown = readings.FirstOrDefault(r =>
-                Math.Sqrt((double)(r.Pitch * r.Pitch + r.Roll * r.Roll)) > 70);
+            var lyingDown = FirstConsecutive(readings, r =>
+                Math.Sqrt((double)(r.Pitch * r.Pitch + r.Roll * r.Roll)) > 70, 3);
             if (lyingDown is not null)
             {
                 var side = lyingDown.Roll > 0 ? "left side" : "right side";
@@ -71,7 +71,8 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
             // Horse roll 45° left  → sensor roll ≈ +38.5°
             // Horse roll 45° right → sensor roll ≈ -30°
             var baseline = config.RollBaseline;
-            var highRoll = readings.FirstOrDefault(r => r.Roll > baseline + 33.5f || r.Roll < baseline - 35f);
+            var highRoll = FirstConsecutive(readings, r =>
+                r.Roll > baseline + 33.5f || r.Roll < baseline - 35f, 3);
             if (highRoll is not null)
             {
                 var horseRoll = highRoll.Roll >= baseline
@@ -83,6 +84,18 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
         }
 
         return Created();
+    }
+
+    static SensorReading? FirstConsecutive(List<SensorReading> readings, Func<SensorReading, bool> predicate, int n)
+    {
+        int streak = 0;
+        SensorReading? first = null;
+        foreach (var r in readings)
+        {
+            if (predicate(r)) { if (streak++ == 0) first = r; if (streak >= n) return first; }
+            else { streak = 0; first = null; }
+        }
+        return null;
     }
 
     [HttpDelete("{id}")]
