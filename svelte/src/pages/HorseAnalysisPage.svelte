@@ -474,6 +474,39 @@
       {/if}
     </section>
 
+    <!-- ── Activity Timeline ────────────────────────────────────────────── -->
+    {#if allReadings.length > 1}
+      {@const t0 = new Date(allReadings[0].timestamp).getTime()}
+      {@const t1 = new Date(allReadings[allReadings.length - 1].timestamp).getTime()}
+      {@const tspan = t1 - t0 || 1}
+      {@const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      <section>
+        <h2>Activity Timeline</h2>
+        <p class="desc">Each bar = one reading, colored by state. Gaps = missing data.</p>
+        <div class="act-timeline">
+          {#each allReadings as r}
+            {@const left = ((new Date(r.timestamp).getTime() - t0) / tspan * 100).toFixed(3)}
+            <div class="act-tick"
+              style="left:{left}%; background:{stateColors[r.state] ?? '#888'}"
+              title="{fmtTime(r.timestamp)} — {r.state}">
+            </div>
+          {/each}
+        </div>
+        <div class="act-axis">
+          <span>{fmtTime(allReadings[0].timestamp)}</span>
+          <span>{fmtTime(allReadings[allReadings.length - 1].timestamp)}</span>
+        </div>
+        <div class="act-legend">
+          {#each Object.entries(stateColors) as [state, color]}
+            <span class="act-legend-item">
+              <span class="act-legend-swatch" style="background:{color}"></span>
+              {state}
+            </span>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
     <!-- ── Activity ──────────────────────────────────────────────────────── -->
     <section>
       <h2>Activity Breakdown</h2>
@@ -567,4 +600,10 @@
   .range-legend { font-size: 0.75rem; color: #94a3b8; display: flex; align-items: center; gap: 0.25rem; margin-top: 0.25rem; }
   .legend-bar { display: inline-block; width: 24px; height: 10px; border-radius: 4px; background: #94a3b8; opacity: 0.7; }
   .legend-tick { display: inline-block; width: 3px; height: 14px; background: #1e293b; border-radius: 2px; margin: 0 0.25rem; }
+  .act-timeline { position: relative; height: 48px; background: #f1f5f9; border-radius: 6px; overflow: hidden; margin-bottom: 0.25rem; }
+  .act-tick { position: absolute; top: 0; width: 3px; height: 100%; opacity: 0.85; }
+  .act-axis { display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.75rem; }
+  .act-legend { display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.78rem; color: #475569; }
+  .act-legend-item { display: flex; align-items: center; gap: 0.3rem; }
+  .act-legend-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
 </style>
