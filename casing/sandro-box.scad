@@ -35,7 +35,7 @@ HUZ_H = HUZ_PCB_H + max(HUZ_COMP_H, HUZ_PIN_H);
 
 wall_thickness = 2;        // Wall thickness
 floor_thickness = 2;       // Bottom floor thickness
-lid_thickness = 2;         // Lid thickness
+lid_thickness = 3;         // Lid thickness
 
 // Mounting posts for electronics
 post_diameter = 4;
@@ -49,8 +49,9 @@ box_width = lipo_battery_width + actual_post_diameter * 2 + wall_thickness * 2;
 box_depth = lipo_battery_depth + wall_thickness * 2 + wiggle_room;
 
 // BNO085 position on lid (depends on box_width / box_depth)
-bno_lid_x = (box_width - bno_stl_w) / 2;   // centred in x
-bno_lid_y = wall_thickness;                 // pushed toward far edge of displayed lid (decrease to move further)
+bno_lid_x = wall_thickness + actual_post_diameter + lipo_battery_depth/2 - bno_stl_w/2;  // mirrors place_bno() x
+bno_y     = wall_thickness + HUZ_H + bno_width + 11;  // BNO y origin in box (mirrors place_bno())
+bno_lid_y = box_depth - bno_y;                        // maps box y → lid local y (lid is y-flipped)
 
 box_height = floor_thickness + lipo_battery_height + HUZ_W + lid_thickness;
 post_height = box_height - floor_thickness;
@@ -88,7 +89,7 @@ module box_body() {
         //translate([box_width/2, box_depth - wall_thickness - 1, box_height - 10])
         //    cube([10, wall_thickness+10, 5]);
         
-        translate([0 -1, box_depth*0.2 - wall_thickness + 2, box_height - 18])
+        translate([0 -1, box_depth*0.2 - wall_thickness + 2, box_height - 19.5])
             cube([5, 5, 10]);
     }
 }
@@ -176,15 +177,23 @@ module lid() {
         ])
         countersunk_hole();
 
-        // ---- BNO085 mounting holes (M2.5 clearance) ----
+        // ---- BNO085 mounting holes (M2.5 countersunk) ----
         translate([bno_lid_x + bno_hole_x1, bno_lid_y + bno_hole_y1, -0.1])
-            cylinder(h = lid_thickness + 0.2, d = bno_hole_d, $fn = 32);
+            bno_countersunk_hole();
         translate([bno_lid_x + bno_hole_x2, bno_lid_y + bno_hole_y1, -0.1])
-            cylinder(h = lid_thickness + 0.2, d = bno_hole_d, $fn = 32);
+            bno_countersunk_hole();
         translate([bno_lid_x + bno_hole_x1, bno_lid_y + bno_hole_y2, -0.1])
-            cylinder(h = lid_thickness + 0.2, d = bno_hole_d, $fn = 32);
+            bno_countersunk_hole();
         translate([bno_lid_x + bno_hole_x2, bno_lid_y + bno_hole_y2, -0.1])
+            bno_countersunk_hole();
+    }
+
+    // M2.5 countersunk hole for BNO085 board
+    module bno_countersunk_hole() {
+        union() {
             cylinder(h = lid_thickness + 0.2, d = bno_hole_d, $fn = 32);
+            cylinder(h = countersink_depth, d1 = 5.0, d2 = bno_hole_d, $fn = 32);
+        }
     }
 
     // Helper module
@@ -239,9 +248,16 @@ module place_battery() {
 //color("LightGray", 0.4)   // 0.4 = 40% opaque, 60% transparent
 box_body();
 
-translate([0, 2 * box_depth + 10, lid_thickness])
+// Lid on top for comparison — swap comments to switch back to print layout
+// % = ghost mode: transparent grey, shows everything underneath
+%translate([0, box_depth, box_height + lid_thickness])
     rotate([180, 0, 0])
         lid();
+
+// Print layout (side by side):
+//translate([0, 2 * box_depth + 10, lid_thickness])
+//    rotate([180, 0, 0])
+//        lid();
 
 place_huzzah();
 place_bno();
