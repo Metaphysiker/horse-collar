@@ -5,6 +5,7 @@
   import { horses } from '../services/horses.js';
   import { sensorReadings } from '../services/sensorReadings.js';
   import { deviceStatus } from '../services/deviceStatus.js';
+  import { collarConfig } from '../services/collarConfig.js';
   import SensorReadingRow from '../components/SensorReadingRow.svelte';
   import { formatDate, formatDateOnly } from '../utils/formatDate.js';
 
@@ -14,6 +15,35 @@
   let status = $state(null);
   let readings = $state([]);
   let selectedDate = $state(todayString());
+  let selectedIds = $state(new Set());
+  let baselineStatus = $state(null);
+
+  const selectedReadings = $derived(readings.filter(r => selectedIds.has(r.id)));
+  const avgRoll = $derived(
+    selectedReadings.length
+      ? selectedReadings.reduce((s, r) => s + r.roll, 0) / selectedReadings.length
+      : null
+  );
+
+  function toggleSelect(id) {
+    const next = new Set(selectedIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    selectedIds = next;
+  }
+
+  async function setBaseline() {
+    if (avgRoll == null) return;
+    const rounded = Math.round(avgRoll * 10) / 10;
+    baselineStatus = null;
+    try {
+      const config = await collarConfig.get(params.id);
+      await collarConfig.update(params.id, { ...config, rollBaseline: rounded });
+      baselineStatus = { ok: true, message: `Roll baseline set to ${rounded}°` };
+      selectedIds = new Set();
+    } catch {
+      baselineStatus = { ok: false, message: 'Failed to update baseline.' };
+    }
+  }
 
   function todayString() {
     return new Date().toISOString().slice(0, 10);
@@ -131,12 +161,24 @@
     </div>
   </div>
 
-{#if readings.length === 0}
+{#if selectedIds.size > 0}
+    <div class="baseline-bar">
+      <span>{selectedIds.size} readings selected &nbsp;·&nbsp; avg roll: <strong>{avgRoll?.toFixed(1)}°</strong></span>
+      <button class="baseline-btn" onclick={setBaseline}>Set as roll baseline</button>
+      <button class="clear-btn" onclick={() => selectedIds = new Set()}>Clear</button>
+    </div>
+  {/if}
+  {#if baselineStatus}
+    <p class="baseline-status" class:ok={baselineStatus.ok} class:error={!baselineStatus.ok}>{baselineStatus.message}</p>
+  {/if}
+
+  {#if readings.length === 0}
     <p>No readings for this day.</p>
   {:else}
     <table>
       <thead>
         <tr>
+          <th></th>
           <th>Time</th>
           <th>State</th>
           <th>Pitch</th>
@@ -152,7 +194,12 @@
       </thead>
       <tbody>
         {#each [...readings].reverse() as reading (reading.id)}
-          <SensorReadingRow {reading} ondelete={() => remove(reading.id)} />
+          <SensorReadingRow
+            {reading}
+            selected={selectedIds.has(reading.id)}
+            ontoggle={() => toggleSelect(reading.id)}
+            ondelete={() => remove(reading.id)}
+          />
         {/each}
       </tbody>
     </table>
@@ -198,4 +245,14 @@
   table { width: 100%; border-collapse: collapse; }
   th, :global(td) { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid #ddd; font-size: 0.9rem; }
   th { font-weight: 600; white-space: nowrap; }
+  .baseline-bar {
+    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+    background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 0.5rem;
+    padding: 0.6rem 1rem; margin-bottom: 0.75rem; font-size: 0.9rem; color: #0369a1;
+  }
+  .baseline-btn { background: #0369a1; color: white; border: none; border-radius: 4px; padding: 0.35rem 0.9rem; font-size: 0.85rem; cursor: pointer; margin: 0; }
+  .clear-btn { background: none; border: 1px solid #bae6fd; border-radius: 4px; padding: 0.35rem 0.75rem; font-size: 0.85rem; cursor: pointer; color: #0369a1; margin: 0; }
+  .baseline-status { padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.88rem; margin-bottom: 0.75rem; }
+  .baseline-status.ok    { background: #dcfce7; color: #166534; }
+  .baseline-status.error { background: #fee2e2; color: #991b1b; }
 </style>

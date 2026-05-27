@@ -2,7 +2,7 @@
   import { fly } from 'svelte/transition';
   import { formatDate } from '../utils/formatDate.js';
 
-  let { reading, ondelete } = $props();
+  let { reading, selected = false, ontoggle, ondelete } = $props();
 
   const stateColors = {
     Standing:  '#22c55e',
@@ -32,7 +32,8 @@
   }
 </script>
 
-<tr in:fly={{ y: -16, duration: 250 }}>
+<tr in:fly={{ y: -16, duration: 250 }} class:selected>
+  <td><input type="checkbox" checked={selected} onchange={ontoggle} /></td>
   <td>{formatDate(reading.timestamp)}</td>
   <td>
     <span class="badge" style="background:{color}">{reading.state}</span>
@@ -89,4 +90,6 @@
     color: #94a3b8;
   }
   button:hover { color: #ef4444; border-color: #ef4444; }
+  .selected { background: #f0f9ff; }
+  input[type="checkbox"] { cursor: pointer; }
 </style>
