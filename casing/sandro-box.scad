@@ -248,20 +248,20 @@ module place_battery() {
 //color("LightGray", 0.4)   // 0.4 = 40% opaque, 60% transparent
 box_body();
 
-// Lid on top for comparison — swap comments to switch back to print layout
-// % = ghost mode: transparent grey, shows everything underneath
-%translate([0, box_depth, box_height + lid_thickness])
+// Lid side by side — countersunk face up, ready for printing
+translate([0, 2 * box_depth + 10, lid_thickness])
     rotate([180, 0, 0])
         lid();
 
-// Print layout (side by side):
-//translate([0, 2 * box_depth + 10, lid_thickness])
+// Lid on top for comparison (swap comments to use):
+//%translate([0, box_depth, box_height + lid_thickness])
 //    rotate([180, 0, 0])
 //        lid();
 
-place_huzzah();
-place_bno();
-place_battery();
+// % = reference only, not printed
+%place_huzzah();
+%place_bno();
+%place_battery();
 
 echo(str("box hoehe: ", box_height));
 echo(str("box width: ", box_width));
