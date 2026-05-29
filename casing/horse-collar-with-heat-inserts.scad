@@ -159,7 +159,7 @@ module place_battery() {
 }
 
 // ── Assembly ───────────────────────────────────────────────────────────
-//box_body();
+box_body();
 
 corner_post(screw_off,              screw_off);
 corner_post(box_length - screw_off, screw_off);
