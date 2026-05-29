@@ -59,9 +59,9 @@ ins_depth  = 3.0;   // M2 insert length
 ins_hole_d = 3.0;   // hole diameter (slightly under insert OD for press fit)
 
 // ── Box dimensions ─────────────────────────────────────────────────────
-bat_clear  = 0.4;   // clearance between battery sides and corner posts
-// Width driven by battery; length adds corner post material
-box_length = bat_length + post_od * 2 + wall * 2 + bat_clear * 2;
+bat_clear  = 0.5;   // clearance between battery and post inner edge on each side
+// Length: battery + two end zones derived from post position (wall + post_od - 1 = screw_off + post_od/2)
+box_length = bat_length + (wall + post_od - 1 + bat_clear) * 2;
 box_width  = bat_width  + wall * 2;
 // Depth: floor + battery + gap + boards hanging from lid
 box_depth  = wall + bat_depth + gap + huz_depth;
@@ -71,7 +71,7 @@ inner_width  = box_width  - 2 * wall;
 inner_depth  = box_depth  - wall;
 
 post_depth = box_depth - wall;
-screw_off  = wall + post_od / 2;
+screw_off  = wall + post_od / 2 - 1;  // 1 mm into wall — insert hole still clears outer face
 
 // ── Board layout (assembly / box coordinates) ──────────────────────────
 // HUZZAH32: USB-C end flush with right wall; both boards centred in width
@@ -155,7 +155,7 @@ module place_bno() {
 
 module place_battery() {
     color("SkyBlue")
-        translate([wall + post_od + bat_clear, wall, wall])
+        translate([wall + post_od - 1 + bat_clear, wall, wall])
             cube([bat_length, bat_width, bat_depth]);
 }
 
