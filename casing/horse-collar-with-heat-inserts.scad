@@ -59,8 +59,9 @@ ins_depth  = 3.0;   // M2 insert length
 ins_hole_d = 3.0;   // hole diameter (slightly under insert OD for press fit)
 
 // ── Box dimensions ─────────────────────────────────────────────────────
+bat_clear  = 0.4;   // clearance between battery sides and corner posts
 // Width driven by battery; length adds corner post material
-box_length = bat_length + post_od * 2 + wall * 2;
+box_length = bat_length + post_od * 2 + wall * 2 + bat_clear * 2;
 box_width  = bat_width  + wall * 2;
 // Depth: floor + battery + gap + boards hanging from lid
 box_depth  = wall + bat_depth + gap + huz_depth;
@@ -154,7 +155,7 @@ module place_bno() {
 
 module place_battery() {
     color("SkyBlue")
-        translate([wall + post_od, wall, wall])
+        translate([wall + post_od + bat_clear, wall, wall])
             cube([bat_length, bat_width, bat_depth]);
 }
 
