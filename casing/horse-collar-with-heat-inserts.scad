@@ -4,6 +4,7 @@
 // HUZZAH32 and BNO085 screwed face-down to lid via M2 heat-set inserts in boss posts
 
 // ── Tuneables ──────────────────────────────────────────────────────────
+lid_assembled = false;  // true = lid ghosted on top for alignment check; false = lid flat beside box for printing
 wall        = 2.0;   // wall and floor thickness
 lid_depth   = 4.0;   // lid thickness — 4 mm minimum for M2 heat-set inserts
 gap         = 3;   // clearance between battery top and board components
@@ -161,35 +162,40 @@ module place_battery() {
 }
 
 // ── Assembly ───────────────────────────────────────────────────────────
-box_body();
+if (lid_assembled) { % box_body(); } else { box_body(); }
 
 corner_post(screw_off,              screw_off);
 corner_post(box_length - screw_off, screw_off);
 corner_post(screw_off,              box_width - screw_off);
 corner_post(box_length - screw_off, box_width - screw_off);
 
-// Lid on top, ghost so components inside remain visible
-// mirror([0,0,1]) flips Z only — countersinks face up, Y unchanged so holes align correctly
-% translate([0, 0, box_depth + lid_depth])
-    mirror([0, 0, 1])
-        lid();
+if (lid_assembled) {
+    // Lid ghosted on top — interior face down, countersinks up, holes align with boards
+    % translate([0, 0, box_depth + lid_depth])
+        mirror([0, 0, 1])
+            lid();
+} else {
+    // Lid flat beside box — interior face down on print bed, countersinks up
+    translate([0, box_width + 10, lid_depth])
+        mirror([0, 0, 1])
+            lid();
+}
 
-// Lid beside box for printing (uncomment when exporting):
-//translate([0, 2 * box_width + 10, lid_depth])
-//    rotate([180, 0, 0])
-//        lid();
-
-place_huzzah();
-color("DarkGrey", 0.15) place_bno();
-place_battery();
-
-// Alignment markers — red = HUZZAH holes, blue = BNO holes
-color("Red")   for (h = huz_holes)
-    translate([huz_off_x + h[0], huz_off_y + h[1], box_depth - 0.5])
-        cylinder(h = 2, d = 1.5, $fn = 16);
-color("Blue")  for (h = bno_holes)
-    translate([bno_off_x + h[0], bno_off_y + h[1], box_depth - 0.5])
-        cylinder(h = 2, d = 1.5, $fn = 16);
+if (lid_assembled) {
+    place_huzzah();
+    color("DarkGrey") place_bno();
+    place_battery();
+    color("Red")  for (h = huz_holes)
+        translate([huz_off_x + h[0], huz_off_y + h[1], box_depth - 0.5])
+            cylinder(h = 2, d = 1.5, $fn = 16);
+    color("Blue") for (h = bno_holes)
+        translate([bno_off_x + h[0], bno_off_y + h[1], box_depth - 0.5])
+            cylinder(h = 2, d = 1.5, $fn = 16);
+} else {
+    % place_huzzah();
+    % color("DarkGrey", 0.15) place_bno();
+    % place_battery();
+}
 
 echo(str("Box: ", box_length, " × ", box_width, " × ", box_depth, " mm"));
 echo(str("Total assembled: ", box_length, " × ", box_width, " × ", box_depth + lid_depth, " mm"));
