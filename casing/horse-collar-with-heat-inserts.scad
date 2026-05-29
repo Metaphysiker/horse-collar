@@ -6,7 +6,7 @@
 // ── Tuneables ──────────────────────────────────────────────────────────
 wall        = 2.0;   // wall and floor thickness
 lid_depth   = 4.0;   // lid thickness — 4 mm minimum for M2 heat-set inserts
-gap         = 1.0;   // clearance between battery top and board components
+gap         = 3;   // clearance between battery top and board components
 boards_gap  = 2.0;   // gap between HUZZAH32 and BNO085 in width direction
 $fn         = 40;
 
@@ -59,10 +59,11 @@ ins_depth  = 3.0;   // M2 insert length
 ins_hole_d = 3.0;   // hole diameter (slightly under insert OD for press fit)
 
 // ── Box dimensions ─────────────────────────────────────────────────────
-bat_clear  = 0.5;   // clearance between battery and post inner edge on each side
+bat_clear_x   = 0.5;   // clearance between battery and post inner edge (x, each side)
+bat_clear_x_y = 0.5;   // clearance between battery and wall (y, each side)
 // Length: battery + two end zones derived from post position (wall + post_od - 1 = screw_off + post_od/2)
-box_length = bat_length + (wall + post_od - 1 + bat_clear) * 2;
-box_width  = bat_width  + wall * 2;
+box_length = bat_length + (wall + post_od - 1 + bat_clear_x) * 2;
+box_width  = bat_width  + wall * 2 + bat_clear_x_y * 2;
 // Depth: floor + battery + gap + boards hanging from lid
 box_depth  = wall + bat_depth + gap + huz_depth;
 
@@ -76,12 +77,12 @@ screw_off  = wall + post_od / 2 - 1;  // 1 mm into wall — insert hole still cl
 // ── Board layout (assembly / box coordinates) ──────────────────────────
 // HUZZAH32: USB-C end flush with right wall; both boards centred in width
 boards_total_width = huz_width + boards_gap + bno_width;
-boards_start_y = wall + (bat_width - boards_total_width) / 2;
+boards_start_y = wall + (inner_width - boards_total_width) / 2;
 
-huz_off_x = 10;   // centred between corner posts; USB-C channel ~12 mm deep
+huz_off_x = 7;    // USB-C channel 9 mm deep
 bno_off_y = boards_start_y;                                // BNO at low Y side
 huz_off_y = boards_start_y + bno_width + boards_gap;       // HUZZAH at high Y side
-bno_off_x = huz_off_x + (huz_length - bno_length) / 2;    // BNO centred in length under HUZZAH
+bno_off_x = huz_off_x + huz_length - bno_length;           // BNO right-aligned under HUZZAH, away from JST port
 
 // USB-C cutout position on right wall
 usb_y = huz_off_y + huz_width / 2 - usb_w / 2;
@@ -155,12 +156,12 @@ module place_bno() {
 
 module place_battery() {
     color("SkyBlue")
-        translate([wall + post_od - 1 + bat_clear, wall, wall])
+        translate([wall + post_od - 1 + bat_clear_x, wall + bat_clear_x_y, wall])
             cube([bat_length, bat_width, bat_depth]);
 }
 
 // ── Assembly ───────────────────────────────────────────────────────────
-box_body();
+//box_body();
 
 corner_post(screw_off,              screw_off);
 corner_post(box_length - screw_off, screw_off);
