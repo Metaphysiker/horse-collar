@@ -576,10 +576,10 @@ void sendReading(HorseState state) {
   doc["pitch"]           = pitch;
   doc["roll"]            = roll;
   doc["yaw"]             = yaw;
-  doc["qw"]              = relQw;
-  doc["qx"]              = relQx;
-  doc["qy"]              = relQy;
-  doc["qz"]              = relQz;
+  doc["qw"]              = curQw;
+  doc["qx"]              = curQx;
+  doc["qy"]              = curQy;
+  doc["qz"]              = curQz;
   doc["acceleration"]    = acceleration;
   doc["activity"]        = acceleration > ACCEL_MOVING ? "moving" : "stable";
   doc["state"]           = stateToString(state);
