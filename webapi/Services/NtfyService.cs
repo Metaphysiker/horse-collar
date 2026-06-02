@@ -6,7 +6,7 @@ public class NtfyService(HttpClient http, IConfiguration config)
     private readonly string _url = $"{config["Ntfy:BaseUrl"]}";
     private readonly string _topic = config["Ntfy:Topic"]!;
 
-    public async Task NotifyAsync(string horseId, HorseState state, string? reason = null)
+    public async Task NotifyAsync(string horseId, AlarmState alarm, string? reason = null)
     {
         var reasonText = reason switch
         {
@@ -19,17 +19,17 @@ public class NtfyService(HttpClient http, IConfiguration config)
             _                  => reason ?? "Unknown reason."
         };
 
-        var (title, message, priority, tag) = state switch
+        var (title, message, priority, tag) = alarm switch
         {
-            HorseState.Emergency => (
+            AlarmState.Emergency => (
                 "🚨 Emergency: Horse down",
                 $"{reasonText} Check immediately.",
                 5, "rotating_light"),
-            HorseState.Alert => (
+            AlarmState.Alert => (
                 "⚠️ Alert: Horse needs attention",
                 reasonText,
                 4, "warning"),
-            _ => throw new ArgumentException("Not an alert state")
+            _ => throw new ArgumentException("Not an alarm state")
         };
 
         var payload = new { topic = _topic, title, message, priority, tags = new[] { tag } };

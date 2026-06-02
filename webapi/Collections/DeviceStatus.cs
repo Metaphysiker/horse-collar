@@ -15,6 +15,4 @@ public class DeviceStatus
     public float BatteryVoltage { get; set; }
     public int BatteryPercent { get; set; }
     public bool BnoConnected { get; set; } = true;
-    public float PitchRef { get; set; }
-    public float RollRef { get; set; }
 }

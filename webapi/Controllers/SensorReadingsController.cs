@@ -29,11 +29,11 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
         reading.HorseId = horseId;
         await _readings.InsertOneAsync(reading);
 
-        if (reading.State is HorseState.Alert or HorseState.Emergency)
+        if (reading.AlarmState != AlarmState.None)
         {
             var config = await _configs.Find(c => c.HorseId == horseId).FirstOrDefaultAsync();
             if (config?.NtfyEnabled == true)
-                await ntfy.NotifyAsync(horseId, reading.State, reading.AlertReason ?? reading.State.ToString());
+                await ntfy.NotifyAsync(horseId, reading.AlarmState, reading.AlertReason ?? reading.AlarmState.ToString());
         }
 
         return Created();
@@ -49,9 +49,9 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
         var config = await _configs.Find(c => c.HorseId == horseId).FirstOrDefaultAsync();
         if (config?.NtfyEnabled == true)
         {
-            var alert = readings.LastOrDefault(r => r.State is HorseState.Alert or HorseState.Emergency);
+            var alert = readings.LastOrDefault(r => r.AlarmState != AlarmState.None);
             if (alert is not null)
-                await ntfy.NotifyAsync(horseId, alert.State, alert.AlertReason ?? alert.State.ToString());
+                await ntfy.NotifyAsync(horseId, alert.AlarmState, alert.AlertReason ?? alert.AlarmState.ToString());
         }
 
         if (config?.LyingDownAlertEnabled == true)
@@ -61,7 +61,7 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
             if (lyingDown is not null)
             {
                 var side = lyingDown.Roll > 0 ? "left side" : "right side";
-                await ntfy.NotifyAsync(horseId, HorseState.Alert, $"[LyingDown] {side} (tilt {Math.Sqrt((double)(lyingDown.Pitch * lyingDown.Pitch + lyingDown.Roll * lyingDown.Roll)):F0}°)");
+                await ntfy.NotifyAsync(horseId, AlarmState.Alert, $"[LyingDown] {side} (tilt {Math.Sqrt((double)(lyingDown.Pitch * lyingDown.Pitch + lyingDown.Roll * lyingDown.Roll)):F0}°)");
             }
         }
 
@@ -79,7 +79,7 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
                     ? (highRoll.Roll - baseline) / 67f * 90f
                     : (highRoll.Roll - baseline) / 70f * 90f;
                 var side = horseRoll > 0 ? "left" : "right";
-                await ntfy.NotifyAsync(horseId, HorseState.Alert, $"[HighRoll] {side} side (horse roll ~{Math.Abs(horseRoll):F0}°)");
+                await ntfy.NotifyAsync(horseId, AlarmState.Alert, $"[HighRoll] {side} side (horse roll ~{Math.Abs(horseRoll):F0}°)");
             }
         }
 

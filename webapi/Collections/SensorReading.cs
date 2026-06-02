@@ -14,6 +14,11 @@ public class SensorReading
 
     public float Pitch { get; set; }
     public float Roll { get; set; }
+    public float Yaw { get; set; }
+    public float Qw { get; set; } = 1.0f;
+    public float Qx { get; set; }
+    public float Qy { get; set; }
+    public float Qz { get; set; }
     public float TiltDeg { get; set; }
     public float Acceleration { get; set; }
     public float AngularVelocity { get; set; }
@@ -21,14 +26,20 @@ public class SensorReading
     public string? AlertReason { get; set; }
     public string Activity { get; set; } = string.Empty;
     public HorseState State { get; set; }
+    public AlarmState AlarmState { get; set; }
 }
 
 public enum HorseState
 {
-    Standing,
-    LyingDown,
+    Calm,
+    Tilted,
     Moving,
-    Rolling,
+    Rolling
+}
+
+public enum AlarmState
+{
+    None,
     Alert,
     Emergency
 }

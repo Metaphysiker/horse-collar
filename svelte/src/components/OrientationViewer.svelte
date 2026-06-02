@@ -3,7 +3,7 @@
   import * as THREE from 'three';
   import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-  let { pitch = 0, roll = 0, pitchRef = 0, rollRef = 0, threshold = 60, tiltDeg = null } = $props();
+  let { pitch = 0, roll = 0, threshold = 60, tiltDeg = null } = $props();
 
   let canvas;
   let renderer, scene, camera, controls, curArrow, refArrow, coneGroup, frameId;
@@ -95,7 +95,7 @@
 
   $effect(() => {
     if (!curArrow || !refArrow || !coneGroup) return;
-    const refDir = normalFromAngles(pitchRef, rollRef);
+    const refDir = normalFromAngles(0, 0);
     curArrow.setDirection(normalFromAngles(pitch, roll));
     refArrow.setDirection(refDir);
     coneGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), refDir);

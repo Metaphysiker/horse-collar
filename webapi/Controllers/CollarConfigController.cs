@@ -51,7 +51,7 @@ public class CollarConfigController(IMongoDatabase db, NtfyService ntfy) : Contr
     [HttpPost("test-notification")]
     public async Task<IActionResult> TestNotification(string horseId)
     {
-        await ntfy.NotifyAsync(horseId, HorseState.Alert, "TestNotification");
+        await ntfy.NotifyAsync(horseId, AlarmState.Alert, "TestNotification");
         return NoContent();
     }
 

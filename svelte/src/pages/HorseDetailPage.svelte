@@ -31,6 +31,51 @@
     selectedIds = next;
   }
 
+  function eulerToQuat(pitchDeg, rollDeg, yawDeg) {
+    const p = pitchDeg * Math.PI / 360;
+    const r = rollDeg  * Math.PI / 360;
+    const y = yawDeg   * Math.PI / 360;
+    const cp = Math.cos(p), sp = Math.sin(p);
+    const cr = Math.cos(r), sr = Math.sin(r);
+    const cy = Math.cos(y), sy = Math.sin(y);
+    return {
+      w: cp*cr*cy - sp*sr*sy,
+      x: sp*cr*cy + cp*sr*sy,
+      y: cp*sr*cy - sp*cr*sy,
+      z: cp*cr*sy + sp*sr*cy,
+    };
+  }
+
+  function averageQuats(quats) {
+    const ref = quats[0];
+    const sum = { w: 0, x: 0, y: 0, z: 0 };
+    for (const q of quats) {
+      const sign = (q.w*ref.w + q.x*ref.x + q.y*ref.y + q.z*ref.z) >= 0 ? 1 : -1;
+      sum.w += sign * q.w; sum.x += sign * q.x;
+      sum.y += sign * q.y; sum.z += sign * q.z;
+    }
+    const n = Math.sqrt(sum.w**2 + sum.x**2 + sum.y**2 + sum.z**2);
+    return { w: sum.w/n, x: sum.x/n, y: sum.y/n, z: sum.z/n };
+  }
+
+  async function setOrientationBaseline() {
+    const valid = selectedReadings.filter(r => r.pitch != null && r.roll != null);
+    if (valid.length === 0) return;
+    const quats = valid.map(r => eulerToQuat(r.pitch, r.roll, r.yaw ?? 0));
+    const avg = averageQuats(quats);
+    baselineStatus = null;
+    try {
+      const config = await collarConfig.get(params.id);
+      await collarConfig.update(params.id, {
+        ...config, refQw: avg.w, refQx: avg.x, refQy: avg.y, refQz: avg.z
+      });
+      baselineStatus = { ok: true, message: `Orientation baseline set from ${valid.length} readings` };
+      selectedIds = new Set();
+    } catch {
+      baselineStatus = { ok: false, message: 'Failed to set orientation baseline.' };
+    }
+  }
+
   async function setBaseline() {
     if (avgRoll == null) return;
     const rounded = Math.round(avgRoll * 10) / 10;
@@ -109,13 +154,13 @@
 
   {#if readings.length > 0}
     {@const latest = readings.at(-1)}
-    {#if latest.state === 'Emergency'}
+    {#if latest.alarmState === 'Emergency'}
       <div class="alert-banner emergency">
         🚨 Emergency — horse has been lying down for over 2 hours. Check on the animal immediately.
       </div>
-    {:else if latest.state === 'Alert'}
+    {:else if latest.alarmState === 'Alert'}
       <div class="alert-banner alert">
-        ⚠️ Alert — horse has been lying down for over 30 minutes. Consider checking in.
+        ⚠️ Alert — {latest.alertReason ?? 'Unusual activity detected'}. Consider checking in.
       </div>
     {/if}
     <div class="orientation-card">
@@ -127,6 +172,10 @@
         <div class="sensor-stat">
           <span class="stat-label">Roll</span>
           <span class="stat-value">{latest.roll?.toFixed(1) ?? '—'}°</span>
+        </div>
+        <div class="sensor-stat">
+          <span class="stat-label">Yaw</span>
+          <span class="stat-value">{latest.yaw?.toFixed(1) ?? '—'}°</span>
         </div>
         <div class="sensor-stat">
           <span class="stat-label">Tilt</span>
@@ -170,7 +219,8 @@
 {#if selectedIds.size > 0}
     <div class="baseline-bar">
       <span>{selectedIds.size} readings selected &nbsp;·&nbsp; avg roll: <strong>{avgRoll?.toFixed(1)}°</strong></span>
-      <button class="baseline-btn" onclick={setBaseline}>Set as roll baseline</button>
+      <button class="baseline-btn" onclick={setBaseline}>Set roll baseline</button>
+      <button class="baseline-btn" onclick={setOrientationBaseline}>Set orientation baseline</button>
       <button class="clear-btn" onclick={() => selectedIds = new Set()}>Clear</button>
     </div>
   {/if}
@@ -189,6 +239,7 @@
           <th>State</th>
           <th>Pitch</th>
           <th>Roll</th>
+          <th>Yaw</th>
           <th>Side</th>
           <th>Horse Roll~</th>
           <th>Tilt</th>

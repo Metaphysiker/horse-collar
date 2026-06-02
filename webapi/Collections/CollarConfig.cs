@@ -21,4 +21,10 @@ public class CollarConfig
     public float ChangeAccel { get; set; } = 1.5f;
     public float ChangePitch { get; set; } = 25.0f;
     public float ChangeRoll { get; set; } = 25.0f;
+
+    // Reference quaternion — identity by default (no correction applied)
+    public float RefQw { get; set; } = 1.0f;
+    public float RefQx { get; set; } = 0.0f;
+    public float RefQy { get; set; } = 0.0f;
+    public float RefQz { get; set; } = 0.0f;
 }

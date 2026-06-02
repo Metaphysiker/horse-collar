@@ -5,15 +5,19 @@
   let { reading, selected = false, ontoggle, ondelete } = $props();
 
   const stateColors = {
-    Standing:  '#22c55e',
-    Moving:    '#3b82f6',
-    LyingDown: '#f59e0b',
-    Rolling:   '#ef4444',
+    Calm:    '#22c55e',
+    Moving:  '#3b82f6',
+    Tilted:  '#f59e0b',
+    Rolling: '#ef4444',
+  };
+
+  const alarmColors = {
     Alert:     '#f97316',
     Emergency: '#dc2626',
   };
 
   const color = $derived(stateColors[reading.state] ?? '#888');
+  const alarmColor = $derived(alarmColors[reading.alarmState] ?? null);
 
   function horseSide(roll) {
     if (roll == null) return null;
@@ -37,12 +41,16 @@
   <td>{formatDate(reading.timestamp)}</td>
   <td>
     <span class="badge" style="background:{color}">{reading.state}</span>
+    {#if alarmColor}
+      <span class="badge" style="background:{alarmColor}">{reading.alarmState}</span>
+    {/if}
     {#if reading.alertReason}
       <span class="reason">{reading.alertReason}</span>
     {/if}
   </td>
   <td>{reading.pitch?.toFixed(1)}°</td>
   <td>{reading.roll?.toFixed(1)}°</td>
+  <td>{reading.yaw?.toFixed(1) ?? '—'}°</td>
   <td>
     {#if horseSide(reading.roll)}
       {@const side = horseSide(reading.roll)}

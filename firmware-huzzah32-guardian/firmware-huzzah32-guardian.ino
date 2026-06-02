@@ -13,7 +13,11 @@
 #define HTTP_TIMEOUT_MS 5000
 #define MAX_BUFFER      200   // max buffered readings in RTC (~6400 bytes)
 
-enum HorseState { Standing, LyingDown, Moving, Rolling, Alert, Emergency };
+enum HorseState { Calm, Tilted, Moving, Rolling };
+enum AlarmState { NoAlarm, Alert, Emergency };
+#define TILT_TILTED_DEG 50.0f
+
+void sendDeviceStatus(bool bnoConnected = true);
 
 // ── Buffered reading stored in RTC ────────────────────────────────────────────
 
@@ -21,17 +25,19 @@ struct BufferedReading {
   int32_t  unixTime;
   float    pitch;
   float    roll;
+  float    yaw;
   float    acceleration;
   float    angularVelocity;
   int16_t  stillCycles;
   uint8_t  state;
+  uint8_t  alarmState;
   uint8_t  alertReasonIdx;   // 0=none, 1=BaselineShift, 2=SuddenFall, 3=ActivityCollapse, 4=ColicRolling
 };
 
 // ── RTC memory — survives deep sleep ──────────────────────────────────────────
 
 RTC_DATA_ATTR bool        firstBoot           = true;
-RTC_DATA_ATTR HorseState  currentState        = Standing;
+RTC_DATA_ATTR HorseState  currentState        = Calm;
 RTC_DATA_ATTR int         stillCycles         = 0;   // consecutive cycles with very low accel
 RTC_DATA_ATTR int         cycleCount          = 0;
 RTC_DATA_ATTR bool        timeSynced          = false;
@@ -42,6 +48,12 @@ RTC_DATA_ATTR int   sendEveryN           = 60;
 RTC_DATA_ATTR float changeAccel          = 1.5f;
 RTC_DATA_ATTR float changePitch          = 25.0f;
 RTC_DATA_ATTR float changeRoll           = 25.0f;
+
+// Reference quaternion for orientation baseline (identity = no correction)
+RTC_DATA_ATTR float refQw = 1.0f;
+RTC_DATA_ATTR float refQx = 0.0f;
+RTC_DATA_ATTR float refQy = 0.0f;
+RTC_DATA_ATTR float refQz = 0.0f;
 
 // Strategy counters
 RTC_DATA_ATTR int   rollingCount         = 0;
@@ -76,9 +88,11 @@ WiFiMulti wifiMulti;
 Adafruit_BNO08x bno;
 
 float curQw = 1, curQx = 0, curQy = 0, curQz = 0;
-float pitch = 0, roll = 0, acceleration = 0, angularVelocity = 0, temperature = 0;
+float relQw = 1, relQx = 0, relQy = 0, relQz = 0;  // quaternion after reference frame transform
+float pitch = 0, roll = 0, yaw = 0, acceleration = 0, angularVelocity = 0, temperature = 0;
 float batteryVoltage = 0;
 const char* alertReason = nullptr;
+AlarmState alarmState = NoAlarm;
 
 // ── Setup — runs once per wake cycle ──────────────────────────────────────────
 
@@ -110,6 +124,7 @@ void setup() {
     syncTime();
     fetchConfig();
     readSensor();
+    applyReferenceFrame();
     currentState = detectState();
     sendReading(currentState);
     sendDeviceStatus();
@@ -121,6 +136,7 @@ void setup() {
   }
 
   readSensor();
+  applyReferenceFrame();
 
   HorseState newState = detectState();
   bool stateChanged   = newState != currentState;
@@ -132,11 +148,12 @@ void setup() {
   else
     stillCycles = 0;
 
-  Serial.printf("pitch:%6.1f  roll:%6.1f  accel:%.2f  gyro:%.2f  still:%d  state:%s%s\n",
+  Serial.printf("pitch:%6.1f  roll:%6.1f  accel:%.2f  gyro:%.2f  still:%d  state:%s  alarm:%s%s\n",
     pitch, roll, acceleration, angularVelocity, stillCycles, stateToString(newState),
+    alarmStateToString(alarmState),
     alertReason ? (String(" [") + alertReason + "]").c_str() : "");
 
-  bool isUrgent = (newState == Alert || newState == Emergency);
+  bool isUrgent = (alarmState != NoAlarm);
 
   if (isUrgent) {
     // Send alert solo so ntfy fires on the backend, flush buffered history first
@@ -165,8 +182,8 @@ void setup() {
   }
 
   int sleepSeconds = sleepNormalS;
-  if (newState == Alert)     sleepSeconds = max(5, sleepNormalS / 2);
-  if (newState == Emergency) sleepSeconds = max(5, sleepNormalS / 3);
+  if (alarmState == Alert)     sleepSeconds = max(5, sleepNormalS / 2);
+  if (alarmState == Emergency) sleepSeconds = max(5, sleepNormalS / 3);
 
   Serial.printf("Sleeping %ds  buffer: %d/%d  cycle: %d (send every %d)\n",
     sleepSeconds, bufferCount, MAX_BUFFER, cycleCount % max(1, sendEveryN), sendEveryN);
@@ -250,6 +267,7 @@ void readSensor() {
         curQz = event.un.rotationVector.k;
         pitch = atan2(2*(curQw*curQx + curQy*curQz), 1 - 2*(curQx*curQx + curQy*curQy)) * 180.0f / PI;
         roll  = asin(constrain(2*(curQw*curQy - curQz*curQx), -1.0f, 1.0f)) * 180.0f / PI;
+        yaw   = atan2(2*(curQw*curQz + curQx*curQy), 1 - 2*(curQy*curQy + curQz*curQz)) * 180.0f / PI;
         gotRotation = true;
       }
       if (event.sensorId == SH2_LINEAR_ACCELERATION) {
@@ -277,12 +295,30 @@ void readSensor() {
   }
 }
 
+// ── Orientation reference frame ───────────────────────────────────────────────
+
+// Transforms pitch/roll/yaw into horse-body coordinates using the stored
+// reference quaternion. When refQ is identity this is a no-op.
+void applyReferenceFrame() {
+  // q_rel = conj(refQ) × curQ
+  float rw =  refQw, rx = -refQx, ry = -refQy, rz = -refQz;
+  relQw = rw*curQw - rx*curQx - ry*curQy - rz*curQz;
+  relQx = rw*curQx + rx*curQw + ry*curQz - rz*curQy;
+  relQy = rw*curQy - rx*curQz + ry*curQw + rz*curQx;
+  relQz = rw*curQz + rx*curQy - ry*curQx + rz*curQw;
+  pitch = atan2(2*(relQw*relQx + relQy*relQz), 1 - 2*(relQx*relQx + relQy*relQy)) * 180.0f / PI;
+  roll  = asin(constrain(2*(relQw*relQy - relQz*relQx), -1.0f, 1.0f)) * 180.0f / PI;
+  yaw   = atan2(2*(relQw*relQz + relQx*relQy), 1 - 2*(relQy*relQy + relQz*relQz)) * 180.0f / PI;
+}
+
 // ── State detection ───────────────────────────────────────────────────────────
 
 HorseState detectState() {
   bool rolling    = acceleration > ACCEL_ROLLING && angularVelocity > GYRO_ROLLING;
   bool moving     = acceleration > ACCEL_MOVING;
   bool stationary = acceleration < ACCEL_STILL;
+  bool tilted     = sqrtf(pitch * pitch + roll * roll) > TILT_TILTED_DEG;
+  alarmState  = NoAlarm;
   alertReason = nullptr;
 
   // [5 — least aggressive] ColicRolling: repeated rolling in short window
@@ -298,8 +334,8 @@ HorseState detectState() {
     activeCycles++;
     if (rollingCount >= ROLLING_ALERT_N) {
       alertReason = "ColicRolling";
+      alarmState  = Alert;
       rollingCount = 0;
-      return Alert;
     }
     return Rolling;
   }
@@ -314,16 +350,16 @@ HorseState detectState() {
       activeCycles     = 0;
       postActiveCycles = 0;
       alertReason = "ActivityCollapse";
-      return Alert;
+      alarmState  = Alert;
     }
   } else {
     activeCycles = max(0, activeCycles - 1);
   }
 
   // [2] SuddenFall: was rolling, now stationary — instant
-  if (stationary && currentState == Rolling) {
+  if (stationary && currentState == Rolling && alarmState == NoAlarm) {
     alertReason = "SuddenFall";
-    return Alert;
+    alarmState  = Alert;
   }
 
   // [1 — most aggressive] BaselineShift: deviation from EMA of accel + pitch + roll
@@ -345,13 +381,15 @@ HorseState detectState() {
     emaAccel = EMA_ALPHA * acceleration + (1 - EMA_ALPHA) * emaAccel;
     emaPitch = EMA_ALPHA * pitch        + (1 - EMA_ALPHA) * emaPitch;
     emaRoll  = EMA_ALPHA * roll         + (1 - EMA_ALPHA) * emaRoll;
-    if (da > changeAccel || dp > changePitch || dr > changeRoll) {
+    if (alarmState == NoAlarm && (da > changeAccel || dp > changePitch || dr > changeRoll)) {
       alertReason = "BaselineShift";
-      return Alert;
+      alarmState  = Alert;
     }
   }
 
-  return moving ? Moving : Standing;
+  if (moving)  return Moving;
+  if (tilted)  return Tilted;
+  return Calm;
 }
 
 // ── Battery ───────────────────────────────────────────────────────────────────
@@ -386,13 +424,19 @@ String isoFromUnix(int32_t t) {
 
 const char* stateToString(HorseState s) {
   switch (s) {
-    case Standing:  return "Standing";
-    case LyingDown: return "LyingDown";
-    case Moving:    return "Moving";
-    case Rolling:   return "Rolling";
+    case Calm:    return "Calm";
+    case Tilted:  return "Tilted";
+    case Moving:  return "Moving";
+    case Rolling: return "Rolling";
+    default:      return "Calm";
+  }
+}
+
+const char* alarmStateToString(AlarmState a) {
+  switch (a) {
     case Alert:     return "Alert";
     case Emergency: return "Emergency";
-    default:        return "Standing";
+    default:        return "None";
   }
 }
 
@@ -444,10 +488,12 @@ void pushToBuffer(HorseState state) {
   r.unixTime        = (int32_t)now;
   r.pitch           = pitch;
   r.roll            = roll;
+  r.yaw             = yaw;
   r.acceleration    = acceleration;
   r.angularVelocity = angularVelocity;
   r.stillCycles     = (int16_t)stillCycles;
   r.state           = (uint8_t)state;
+  r.alarmState      = (uint8_t)alarmState;
   r.alertReasonIdx  = alertReasonToIdx(alertReason);
 }
 
@@ -463,10 +509,12 @@ void flushBuffer() {
     obj["timestamp"]       = isoFromUnix(r.unixTime);
     obj["pitch"]           = r.pitch;
     obj["roll"]            = r.roll;
+    obj["yaw"]             = r.yaw;
     obj["acceleration"]    = r.acceleration;
     obj["angularVelocity"] = r.angularVelocity;
     obj["lyingCycles"]     = r.stillCycles;
     obj["state"]           = stateToString((HorseState)r.state);
+    obj["alarmState"]      = alarmStateToString((AlarmState)r.alarmState);
     obj["activity"]        = r.acceleration > ACCEL_MOVING ? "moving" : "stable";
     const char* reason = idxToAlertReason(r.alertReasonIdx);
     if (reason) obj["alertReason"] = reason;
@@ -504,8 +552,12 @@ void fetchConfig() {
     changeAccel  = doc["changeAccel"]   | changeAccel;
     changePitch  = doc["changePitch"]   | changePitch;
     changeRoll   = doc["changeRoll"]    | changeRoll;
-    Serial.printf("Config: sleep=%ds  sendEveryN=%d  changeAccel=%.2f  changePitch=%.1f  changeRoll=%.1f\n",
-      sleepNormalS, sendEveryN, changeAccel, changePitch, changeRoll);
+    refQw        = doc["refQw"]         | refQw;
+    refQx        = doc["refQx"]         | refQx;
+    refQy        = doc["refQy"]         | refQy;
+    refQz        = doc["refQz"]         | refQz;
+    Serial.printf("Config: sleep=%ds  sendEveryN=%d  refQ=(%.3f,%.3f,%.3f,%.3f)\n",
+      sleepNormalS, sendEveryN, refQw, refQx, refQy, refQz);
     if (doc["reboot"] | false) {
       post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/reboot/clear", "{}");
       Serial.println("Remote reboot triggered");
@@ -523,9 +575,15 @@ void sendReading(HorseState state) {
   doc["timestamp"]       = isoTimestamp();
   doc["pitch"]           = pitch;
   doc["roll"]            = roll;
+  doc["yaw"]             = yaw;
+  doc["qw"]              = relQw;
+  doc["qx"]              = relQx;
+  doc["qy"]              = relQy;
+  doc["qz"]              = relQz;
   doc["acceleration"]    = acceleration;
   doc["activity"]        = acceleration > ACCEL_MOVING ? "moving" : "stable";
   doc["state"]           = stateToString(state);
+  doc["alarmState"]      = alarmStateToString(alarmState);
   doc["angularVelocity"] = angularVelocity;
   doc["lyingCycles"]     = stillCycles;
   if (alertReason)       doc["alertReason"] = alertReason;
@@ -533,7 +591,7 @@ void sendReading(HorseState state) {
   post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/readings", body);
 }
 
-void sendDeviceStatus(bool bnoConnected = true) {
+void sendDeviceStatus(bool bnoConnected) {
   JsonDocument doc;
   doc["timestamp"]      = isoTimestamp();
   doc["batteryVoltage"] = batteryVoltage;
