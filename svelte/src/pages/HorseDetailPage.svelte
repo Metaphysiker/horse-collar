@@ -13,6 +13,7 @@
 
   let horse = $state(null);
   let status = $state(null);
+  let config = $state(null);
   let readings = $state([]);
   let selectedDate = $state(todayString());
   let selectedIds = $state(new Set());
@@ -65,8 +66,7 @@
     const avg = averageQuats(quats);
     baselineStatus = null;
     try {
-      const config = await collarConfig.get(params.id);
-      await collarConfig.update(params.id, {
+      config = await collarConfig.update(params.id, {
         ...config, refQw: avg.w, refQx: avg.x, refQy: avg.y, refQz: avg.z
       });
       baselineStatus = { ok: true, message: `Orientation baseline set from ${valid.length} readings` };
@@ -81,8 +81,7 @@
     const rounded = Math.round(avgRoll * 10) / 10;
     baselineStatus = null;
     try {
-      const config = await collarConfig.get(params.id);
-      await collarConfig.update(params.id, { ...config, rollBaseline: rounded });
+      config = await collarConfig.update(params.id, { ...config, rollBaseline: rounded });
       baselineStatus = { ok: true, message: `Roll baseline set to ${rounded}°` };
       selectedIds = new Set();
     } catch {
@@ -97,9 +96,10 @@
   let refreshInterval;
 
   onMount(async () => {
-    [horse, status] = await Promise.all([
+    [horse, status, config] = await Promise.all([
       horses.getById(params.id),
       deviceStatus.getLatest(params.id).catch(() => null),
+      collarConfig.get(params.id).catch(() => null),
     ]);
     await loadReadings();
     refreshInterval = setInterval(async () => {
