@@ -246,6 +246,14 @@
           <th>Accel</th>
           <th>Gyro</th>
           <th>Temp</th>
+          <th class="quat-head">Qw</th>
+          <th class="quat-head">Qx</th>
+          <th class="quat-head">Qy</th>
+          <th class="quat-head">Qz</th>
+          <th class="quat-head">rQw</th>
+          <th class="quat-head">rQx</th>
+          <th class="quat-head">rQy</th>
+          <th class="quat-head">rQz</th>
           <th></th>
         </tr>
       </thead>
@@ -253,6 +261,7 @@
         {#each [...readings].reverse() as reading (reading.id)}
           <SensorReadingRow
             {reading}
+            {config}
             selected={selectedIds.has(reading.id)}
             ontoggle={() => toggleSelect(reading.id)}
             ondelete={() => remove(reading.id)}
@@ -305,6 +314,7 @@
   .stat-label { font-size: 0.72rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
   .stat-value { font-size: 0.9rem; font-weight: 600; color: #1e293b; margin-top: 0.1rem; }
   table { width: 100%; border-collapse: collapse; }
+  :global(.quat-head) { color: #94a3b8; font-size: 0.78rem; }
   th, :global(td) { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid #ddd; font-size: 0.9rem; }
   th { font-weight: 600; white-space: nowrap; }
   .baseline-bar {

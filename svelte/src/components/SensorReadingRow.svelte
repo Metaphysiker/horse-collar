@@ -2,7 +2,26 @@
   import { fly } from 'svelte/transition';
   import { formatDate } from '../utils/formatDate.js';
 
-  let { reading, selected = false, ontoggle, ondelete } = $props();
+  let { reading, config = null, selected = false, ontoggle, ondelete } = $props();
+
+  function applyBaseline(qw, qx, qy, qz) {
+    const rw =  (config?.refQw ?? 1);
+    const rx = -(config?.refQx ?? 0);
+    const ry = -(config?.refQy ?? 0);
+    const rz = -(config?.refQz ?? 0);
+    return {
+      w: rw*qw - rx*qx - ry*qy - rz*qz,
+      x: rw*qx + rx*qw + ry*qz - rz*qy,
+      y: rw*qy - rx*qz + ry*qw + rz*qx,
+      z: rw*qz + rx*qy - ry*qx + rz*qw,
+    };
+  }
+
+  const relQ = $derived(
+    reading.qw != null
+      ? applyBaseline(reading.qw, reading.qx, reading.qy, reading.qz)
+      : null
+  );
 
   const stateColors = {
     Calm:    '#22c55e',
@@ -64,6 +83,14 @@
   <td>{reading.acceleration?.toFixed(2)}</td>
   <td>{reading.angularVelocity?.toFixed(2) ?? '—'}</td>
   <td>{reading.temperature != null ? reading.temperature.toFixed(1) + '°' : '—'}</td>
+  <td class="quat">{reading.qw?.toFixed(3) ?? '—'}</td>
+  <td class="quat">{reading.qx?.toFixed(3) ?? '—'}</td>
+  <td class="quat">{reading.qy?.toFixed(3) ?? '—'}</td>
+  <td class="quat">{reading.qz?.toFixed(3) ?? '—'}</td>
+  <td class="quat rel">{relQ?.w.toFixed(3) ?? '—'}</td>
+  <td class="quat rel">{relQ?.x.toFixed(3) ?? '—'}</td>
+  <td class="quat rel">{relQ?.y.toFixed(3) ?? '—'}</td>
+  <td class="quat rel">{relQ?.z.toFixed(3) ?? '—'}</td>
   <td>
     <button onclick={() => { if (confirm(`Delete reading from ${formatDate(reading.timestamp)}?`)) ondelete(); }}>
       ✕
@@ -100,4 +127,6 @@
   button:hover { color: #ef4444; border-color: #ef4444; }
   .selected { background: #f0f9ff; }
   input[type="checkbox"] { cursor: pointer; }
+  :global(.quat) { font-size: 0.78rem; color: #94a3b8; font-family: monospace; }
+  :global(.quat.rel) { color: #7c3aed; }
 </style>
