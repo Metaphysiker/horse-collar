@@ -87,7 +87,23 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 
   batteryVoltage = readBatteryVoltage();
-  initBno();
+  Serial.printf("Battery: %.2fV (%d%%)\n", batteryVoltage, voltageToPercent(batteryVoltage));
+  if (batteryVoltage < 3.4f) {
+    Serial.println("Battery critical — sleeping 1h to protect cell");
+    esp_sleep_enable_timer_wakeup(3600ULL * 1000000ULL);
+    esp_deep_sleep_start();
+  }
+  if (!initBno()) {
+    connectWifi();
+    if (!timeSynced) syncTime();
+    sendDeviceStatus(false);
+    fetchConfig();
+    disconnectWifi();
+    int retrySecs = max(30, sleepNormalS);
+    Serial.printf("BNO missing — retrying in %ds\n", retrySecs);
+    esp_sleep_enable_timer_wakeup((uint64_t)retrySecs * 1000000ULL);
+    esp_deep_sleep_start();
+  }
 
   if (firstBoot) {
     connectWifi();
@@ -209,15 +225,16 @@ void syncTime() {
 
 // ── BNO085 ────────────────────────────────────────────────────────────────────
 
-void initBno() {
+bool initBno() {
   if (!bno.begin_I2C()) {
     Serial.println("BNO085 not found — check wiring");
-    while (1) delay(100);
+    return false;
   }
   bno.enableReport(SH2_ROTATION_VECTOR);
   bno.enableReport(SH2_LINEAR_ACCELERATION);
   bno.enableReport(SH2_GYROSCOPE_CALIBRATED);
   delay(100);
+  return true;
 }
 
 void readSensor() {
@@ -516,11 +533,12 @@ void sendReading(HorseState state) {
   post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/readings", body);
 }
 
-void sendDeviceStatus() {
+void sendDeviceStatus(bool bnoConnected = true) {
   JsonDocument doc;
   doc["timestamp"]      = isoTimestamp();
   doc["batteryVoltage"] = batteryVoltage;
   doc["batteryPercent"] = voltageToPercent(batteryVoltage);
+  doc["bnoConnected"]   = bnoConnected;
   String body; serializeJson(doc, body);
   post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/status", body);
 }

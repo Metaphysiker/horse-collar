@@ -94,6 +94,12 @@
           <span class="battery-fill" style="width: {status.batteryPercent}%; background: {status.batteryPercent < 20 ? '#ef4444' : status.batteryPercent < 50 ? '#f59e0b' : '#22c55e'}"></span>
         </span>
         <span class="battery-text">{status.batteryPercent}% &nbsp;·&nbsp; {status.batteryVoltage.toFixed(2)} V</span>
+        {#if status.batteryVoltage < 3.4}
+          <span class="badge badge-critical">🔋 Schläft (Batterie kritisch)</span>
+        {/if}
+        <span class="bno-badge" class:bno-ok={status.bnoConnected !== false} class:bno-err={status.bnoConnected === false}>
+          BNO {status.bnoConnected === false ? '✗' : '✓'}
+        </span>
         <span class="status-time">Zuletzt gesehen: {formatDate(status.timestamp)}</span>
       {:else}
         <span class="no-device">Noch keine Gerätedaten verfügbar</span>
@@ -221,6 +227,11 @@
   .battery-text { color: #1e293b; font-weight: 500; }
   .status-time { margin-left: auto; color: #94a3b8; font-size: 0.82rem; }
   .no-device { color: #94a3b8; font-style: italic; }
+  .badge { font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.5rem; border-radius: 4px; }
+  .badge-critical { background: #fee2e2; color: #991b1b; }
+  .bno-badge { font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.5rem; border-radius: 4px; }
+  .bno-ok  { background: #dcfce7; color: #166534; }
+  .bno-err { background: #fee2e2; color: #991b1b; }
   .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
   .toolbar h2 { margin: 0; }
   .date-picker { display: flex; align-items: center; gap: 0.5rem; }
