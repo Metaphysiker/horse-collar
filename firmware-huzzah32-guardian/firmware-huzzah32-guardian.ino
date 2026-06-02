@@ -16,8 +16,10 @@
 enum HorseState { Calm, Tilted, Moving, Rolling };
 enum AlarmState { NoAlarm, Alert, Emergency };
 #define TILT_TILTED_DEG 50.0f
+#define BNO_INT_PIN     14    // wire BNO085 INT to this RTC-capable GPIO
 
 void sendDeviceStatus(bool bnoConnected = true);
+void sleepWithBno(uint64_t usec);
 
 // ── Buffered reading stored in RTC ────────────────────────────────────────────
 
@@ -65,8 +67,10 @@ RTC_DATA_ATTR float emaPitch             = 0;
 RTC_DATA_ATTR float emaRoll              = 0;
 RTC_DATA_ATTR int   settledCycles        = 0;
 
-// Buffer
-RTC_DATA_ATTR int             bufferCount  = 0;
+// Buffer — increment BUFFER_VERSION whenever BufferedReading struct changes
+#define BUFFER_VERSION 3
+RTC_DATA_ATTR uint8_t         bufferVersion = 0;
+RTC_DATA_ATTR int             bufferCount   = 0;
 RTC_DATA_ATTR BufferedReading buffer[MAX_BUFFER];
 
 // Detection thresholds — purely dynamics-based, no calibration needed
@@ -100,6 +104,16 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
 
+  esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
+  bool motionWake = (wakeupCause == ESP_SLEEP_WAKEUP_EXT0);
+
+  if (bufferVersion != BUFFER_VERSION) {
+    bufferCount   = 0;
+    bufferVersion = BUFFER_VERSION;
+    firstBoot     = true;
+    Serial.println("Buffer version mismatch — cleared stale RTC buffer");
+  }
+
   batteryVoltage = readBatteryVoltage();
   Serial.printf("Battery: %.2fV (%d%%)\n", batteryVoltage, voltageToPercent(batteryVoltage));
   if (batteryVoltage < 3.4f) {
@@ -116,7 +130,7 @@ void setup() {
     int retrySecs = max(30, sleepNormalS);
     Serial.printf("BNO missing — retrying in %ds\n", retrySecs);
     esp_sleep_enable_timer_wakeup((uint64_t)retrySecs * 1000000ULL);
-    esp_deep_sleep_start();
+    esp_deep_sleep_start();  // no ext0 — BNO not initialised
   }
 
   if (firstBoot) {
@@ -131,12 +145,20 @@ void setup() {
     disconnectWifi();
     firstBoot = false;
     Serial.printf("Sleeping %ds (first boot done)\n", sleepNormalS);
-    esp_sleep_enable_timer_wakeup((uint64_t)sleepNormalS * 1000000ULL);
-    esp_deep_sleep_start();
+    sleepWithBno((uint64_t)sleepNormalS * 1000000ULL);
   }
 
   readSensor();
   applyReferenceFrame();
+
+  if (motionWake) {
+    float tiltDeg = 2.0f * acos(constrain(fabsf(relQw), 0.0f, 1.0f)) * 180.0f / PI;
+    Serial.printf("Motion wake — tilt %.1f°\n", tiltDeg);
+    if (tiltDeg < TILT_TILTED_DEG) {
+      Serial.println("False positive — re-sleeping");
+      sleepWithBno((uint64_t)sleepNormalS * 1000000ULL);
+    }
+  }
 
   HorseState newState = detectState();
   bool stateChanged   = newState != currentState;
@@ -187,11 +209,21 @@ void setup() {
 
   Serial.printf("Sleeping %ds  buffer: %d/%d  cycle: %d (send every %d)\n",
     sleepSeconds, bufferCount, MAX_BUFFER, cycleCount % max(1, sendEveryN), sendEveryN);
-  esp_sleep_enable_timer_wakeup((uint64_t)sleepSeconds * 1000000ULL);
-  esp_deep_sleep_start();
+  sleepWithBno((uint64_t)sleepSeconds * 1000000ULL);
 }
 
 void loop() {}  // never reached — deep sleep restarts setup()
+
+// Re-arms BNO085 significant motion detector, then sleeps with both INT and timer wakeup.
+void sleepWithBno(uint64_t usec) {
+  bno.enableReport(SH2_ROTATION_VECTOR,       0);  // disable continuous reports
+  bno.enableReport(SH2_LINEAR_ACCELERATION,   0);
+  bno.enableReport(SH2_GYROSCOPE_CALIBRATED,  0);
+  bno.enableReport(SH2_SIGNIFICANT_MOTION);        // one-shot: fires INT only on motion
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)BNO_INT_PIN, 0);
+  esp_sleep_enable_timer_wakeup(usec);
+  esp_deep_sleep_start();
+}
 
 // ── WiFi ──────────────────────────────────────────────────────────────────────
 
@@ -250,6 +282,7 @@ bool initBno() {
   bno.enableReport(SH2_ROTATION_VECTOR);
   bno.enableReport(SH2_LINEAR_ACCELERATION);
   bno.enableReport(SH2_GYROSCOPE_CALIBRATED);
+  bno.enableReport(SH2_SIGNIFICANT_MOTION);
   delay(100);
   return true;
 }
