@@ -4,7 +4,9 @@
 // HUZZAH32 and BNO085 screwed face-down to lid via M2 heat-set inserts in boss posts
 
 // ── Tuneables ──────────────────────────────────────────────────────────
-lid_assembled = false;  // true = lid ghosted on top for alignment check; false = lid flat beside box for printing
+// "box" = export box STL  |  "lid" = export lid STL  |  "preview" = both side by side  |  "assembled" = alignment check
+part = "lid";
+lid_assembled = (part == "assembled");
 wall        = 2.0;   // wall and floor thickness
 lid_depth   = 4.0;   // lid thickness — 4 mm minimum for M2 heat-set inserts
 gap         = 3;   // clearance between battery top and board components
@@ -162,26 +164,33 @@ module place_battery() {
 }
 
 // ── Assembly ───────────────────────────────────────────────────────────
-if (lid_assembled) { % box_body(); } else { box_body(); }
+module box_assembly() {
+    box_body();
+    corner_post(screw_off,              screw_off);
+    corner_post(box_length - screw_off, screw_off);
+    corner_post(screw_off,              box_width - screw_off);
+    corner_post(box_length - screw_off, box_width - screw_off);
+}
 
-corner_post(screw_off,              screw_off);
-corner_post(box_length - screw_off, screw_off);
-corner_post(screw_off,              box_width - screw_off);
-corner_post(box_length - screw_off, box_width - screw_off);
-
-if (lid_assembled) {
-    // Lid ghosted on top — interior face down, countersinks up, holes align with boards
-    % translate([0, 0, box_depth + lid_depth])
-        mirror([0, 0, 1])
-            lid();
-} else {
-    // Lid flat beside box — interior face down on print bed, countersinks up
-    translate([0, box_width + 10, lid_depth])
+module lid_print() {
+    translate([0, 0, lid_depth])
         mirror([0, 0, 1])
             lid();
 }
 
-if (lid_assembled) {
+if (part == "box") {
+    box_assembly();
+} else if (part == "lid") {
+    lid_print();
+} else if (part == "preview") {
+    box_assembly();
+    translate([0, box_width + 10, 0]) lid_print();
+    % place_huzzah();
+    % color("DarkGrey", 0.15) place_bno();
+    % place_battery();
+} else if (part == "assembled") {
+    % box_assembly();
+    % translate([0, 0, box_depth + lid_depth]) mirror([0, 0, 1]) lid();
     place_huzzah();
     color("DarkGrey") place_bno();
     place_battery();
@@ -191,10 +200,6 @@ if (lid_assembled) {
     color("Blue") for (h = bno_holes)
         translate([bno_off_x + h[0], bno_off_y + h[1], box_depth - 0.5])
             cylinder(h = 2, d = 1.5, $fn = 16);
-} else {
-    % place_huzzah();
-    % color("DarkGrey", 0.15) place_bno();
-    % place_battery();
 }
 
 echo(str("Box: ", box_length, " × ", box_width, " × ", box_depth, " mm"));
