@@ -27,4 +27,16 @@ public class CollarConfig
     public float RefQx { get; set; } = 0.0f;
     public float RefQy { get; set; } = 0.0f;
     public float RefQz { get; set; } = 0.0f;
+
+    public bool AxesCalibrated { get; set; } = false;
+
+    // Body-frame axes in sensor-relative space — set by orientation calibration wizard
+    // Roll axis: direction in sensor frame that corresponds to horse tilting left/right
+    public float RollAxisX { get; set; } = 0.0f;
+    public float RollAxisY { get; set; } = 1.0f;  // default: Y axis
+    public float RollAxisZ { get; set; } = 0.0f;
+    // Pitch axis: direction in sensor frame that corresponds to horse pitching front/back
+    public float PitchAxisX { get; set; } = 1.0f;  // default: X axis
+    public float PitchAxisY { get; set; } = 0.0f;
+    public float PitchAxisZ { get; set; } = 0.0f;
 }

@@ -31,7 +31,10 @@
 
   const horseRoll = $derived.by(() => {
     if (!relQ) return null;
-    const rollDeg = Math.asin(Math.max(-1, Math.min(1, 2*(relQ.w*relQ.y - relQ.z*relQ.x)))) * 180 / Math.PI;
+    const ax = config?.rollAxisX ?? 0;
+    const ay = config?.rollAxisY ?? 1;
+    const az = config?.rollAxisZ ?? 0;
+    const rollDeg = 2 * Math.atan2(relQ.x*ax + relQ.y*ay + relQ.z*az, relQ.w) * 180 / Math.PI;
     const abs = Math.abs(rollDeg);
     const side = rollDeg > 0 ? 'Left' : 'Right';
     const deg = rollDeg.toFixed(1);

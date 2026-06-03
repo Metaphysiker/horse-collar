@@ -8,6 +8,7 @@
   let canvas;
   let renderer, animFrame;
   let currentIdx = $state(0);
+  let translated = $state(true);
 
   function applyBaseline(qw, qx, qy, qz) {
     const rw =  (config?.refQw ?? 1);
@@ -25,6 +26,22 @@
   function quatForReading(r) {
     if (!r || r.qw == null) return new THREE.Quaternion();
     return applyBaseline(r.qw, r.qx, r.qy, r.qz);
+  }
+
+  function getFrameQ() {
+    if (!config?.axesCalibrated) return new THREE.Quaternion(); // identity — no correction
+    const rollVec  = new THREE.Vector3(config.rollAxisX,  config.rollAxisY,  config.rollAxisZ).normalize();
+    const pitchVec = new THREE.Vector3(config.pitchAxisX, config.pitchAxisY, config.pitchAxisZ).normalize();
+    const yawVec   = new THREE.Vector3().crossVectors(rollVec, pitchVec).normalize();
+    // Rows map sensor axes to display axes: rollVec→Z(spine), pitchVec→X(lateral), yawVec→Y(up)
+    // M×v extracts dot products with each row, so: M×rollVec=(0,0,1), M×pitchVec=(1,0,0), M×yawVec=(0,1,0)
+    const m = new THREE.Matrix4().set(
+      pitchVec.x, pitchVec.y, pitchVec.z, 0,
+      yawVec.x,   yawVec.y,   yawVec.z,   0,
+      rollVec.x,  rollVec.y,  rollVec.z,  0,
+      0, 0, 0, 1
+    );
+    return new THREE.Quaternion().setFromRotationMatrix(m);
   }
 
   function buildHorseHead(scene) {
@@ -129,7 +146,13 @@
         lastAdvance = ts;
       }
 
-      currentQ.slerp(quatForReading(list[idx]), 0.12);
+      const raw = quatForReading(list[idx]);
+      let target = raw;
+      if (translated) {
+        const frameQ = getFrameQ();
+        target = frameQ.clone().multiply(raw).multiply(frameQ.clone().conjugate());
+      }
+      currentQ.slerp(target, 0.12);
       head.quaternion.copy(currentQ);
       renderer.render(scene, camera);
     }
@@ -147,6 +170,13 @@
   <div class="info">
     <span class="counter">{currentIdx + 1} / {readings.length}</span>
     <span class="ts">{formatDate(readings[currentIdx]?.timestamp)}</span>
+    <label class="switch-label">
+      <span class:dim={translated}>Raw</span>
+      <button class="switch" class:on={translated} onclick={() => translated = !translated}>
+        <span class="thumb"></span>
+      </button>
+      <span class:dim={!translated}>Translated</span>
+    </label>
   </div>
 {/if}
 
@@ -158,4 +188,17 @@
     font-family: monospace; font-size: 0.78rem;
   }
   .counter { color: #0ea5e9; font-weight: 600; }
+  .switch-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
+  .dim { opacity: 0.4; }
+  .switch {
+    width: 32px; height: 18px; border-radius: 9px; border: none; cursor: pointer;
+    background: #334155; position: relative; padding: 0; transition: background 0.2s;
+  }
+  .switch.on { background: #0ea5e9; }
+  .thumb {
+    position: absolute; top: 3px; left: 3px;
+    width: 12px; height: 12px; border-radius: 50%; background: white;
+    transition: left 0.2s;
+  }
+  .switch.on .thumb { left: 17px; }
 </style>

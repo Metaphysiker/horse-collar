@@ -49,6 +49,78 @@
     selectedIds = next;
   }
 
+  // ── Calibration wizard ───────────────────────────────────────────────────────
+
+  let calibOpen = $state(false);
+  let calibSlots = $state({ left: null, right: null, front: null, back: null });
+  let calibStatus = $state(null);
+
+  const baselineSet = $derived(
+    config != null && (config.refQx !== 0 || config.refQy !== 0 || config.refQz !== 0 || config.refQw !== 1)
+  );
+  const calibReady = $derived(
+    calibSlots.left && calibSlots.right && calibSlots.front && calibSlots.back && baselineSet
+  );
+
+  function applyBaseline(qw, qx, qy, qz) {
+    const rw =  (config?.refQw ?? 1);
+    const rx = -(config?.refQx ?? 0);
+    const ry = -(config?.refQy ?? 0);
+    const rz = -(config?.refQz ?? 0);
+    return {
+      w: rw*qw - rx*qx - ry*qy - rz*qz,
+      x: rw*qx + rx*qw + ry*qz - rz*qy,
+      y: rw*qy - rx*qz + ry*qw + rz*qx,
+      z: rw*qz + rx*qy - ry*qx + rz*qw,
+    };
+  }
+
+  // Live angle — derived from the latest reading, updates as new readings arrive
+  const liveRelQ = $derived.by(() => {
+    if (!baselineSet) return null;
+    const latest = readings.at(-1);
+    if (!latest?.qw) return null;
+    return applyBaseline(latest.qw, latest.qx, latest.qy, latest.qz);
+  });
+
+  const liveAngle = $derived.by(() => {
+    if (!liveRelQ) return null;
+    return 2 * Math.acos(Math.min(1, Math.abs(liveRelQ.w))) * 180 / Math.PI;
+  });
+
+  function captureSlot(slot) {
+    if (!liveRelQ) return;
+    calibSlots = { ...calibSlots, [slot]: { ...liveRelQ } };
+    selectedIds = new Set();
+  }
+
+  function normalize3(x, y, z) {
+    const len = Math.sqrt(x*x + y*y + z*z);
+    return len > 0 ? { x: x/len, y: y/len, z: z/len } : { x: 0, y: 1, z: 0 };
+  }
+
+  async function computeAndSaveAxes() {
+    const { left, right, front, back } = calibSlots;
+    // Each slot's vector part (x,y,z) points along the rotation axis × sin(θ/2).
+    // left and right should be opposite rotations around the same axis,
+    // so subtracting negates the noise and doubles the signal.
+    const rollAxis  = normalize3(left.x - right.x, left.y - right.y, left.z - right.z);
+    const pitchAxis = normalize3(front.x - back.x, front.y - back.y, front.z - back.z);
+    calibStatus = null;
+    try {
+      config = await collarConfig.update(params.id, {
+        ...config,
+        axesCalibrated: true,
+        rollAxisX:  rollAxis.x,  rollAxisY:  rollAxis.y,  rollAxisZ:  rollAxis.z,
+        pitchAxisX: pitchAxis.x, pitchAxisY: pitchAxis.y, pitchAxisZ: pitchAxis.z,
+      });
+      calibStatus = { ok: true, message: 'Axes saved.' };
+      calibSlots = { left: null, right: null, front: null, back: null };
+    } catch {
+      calibStatus = { ok: false, message: 'Failed to save axes.' };
+    }
+  }
+
   function averageQuats(quats) {
     const ref = quats[0];
     const sum = { w: 0, x: 0, y: 0, z: 0 };
@@ -230,6 +302,72 @@
     <p class="baseline-status" class:ok={baselineStatus.ok} class:error={!baselineStatus.ok}>{baselineStatus.message}</p>
   {/if}
 
+  <div class="calib-toggle">
+    <button class="calib-open-btn" onclick={() => calibOpen = !calibOpen}>
+      {calibOpen ? '▲' : '▼'} Calibrate orientation axes
+    </button>
+  </div>
+
+  {#if calibOpen}
+    <div class="calib-panel">
+
+      <div class="calib-step">
+        <span class="calib-step-label">Step 1 — Flat baseline</span>
+        <span class="calib-check" class:done={baselineSet}>
+          {baselineSet ? '✓ Set' : '⚠ Not set — select flat readings above and click "Set orientation baseline"'}
+        </span>
+      </div>
+
+      {#if baselineSet}
+        <div class="calib-live">
+          <span class="calib-step-label">Live angle from baseline</span>
+          <div class="angle-row">
+            <span class="angle-value">{liveAngle?.toFixed(1) ?? '—'}°</span>
+            <div class="angle-track">
+              <div class="angle-fill" style="width:{Math.min(100, ((liveAngle ?? 0) / 90) * 100)}%;
+                background:{!liveAngle ? '#e2e8f0' : liveAngle < 45 ? '#94a3b8' : liveAngle < 70 ? '#f59e0b' : '#22c55e'}">
+              </div>
+              <span class="angle-mark">90°</span>
+            </div>
+            <span class="angle-hint">
+              {#if !liveRelQ}no quaternion data{:else if liveAngle < 45}tilt more{:else if liveAngle < 70}keep going…{:else}✓ good — click a slot{/if}
+            </span>
+          </div>
+        </div>
+
+        <div class="calib-step">
+          <span class="calib-step-label">Step 2 — Roll axis</span>
+          <p class="calib-desc">Tilt 90° to the left, then click <strong>Left</strong>. Then tilt 90° to the right and click <strong>Right</strong>.</p>
+          <div class="calib-row">
+            <button class="calib-btn" onclick={() => captureSlot('left')}  disabled={!liveRelQ || liveAngle < 45}>Set Left</button>
+            <span class="calib-check" class:done={calibSlots.left}>{calibSlots.left  ? `✓ ${(2*Math.acos(Math.min(1,Math.abs(calibSlots.left.w)))*180/Math.PI).toFixed(0)}°` : '—'}</span>
+            <button class="calib-btn" onclick={() => captureSlot('right')} disabled={!liveRelQ || liveAngle < 45}>Set Right</button>
+            <span class="calib-check" class:done={calibSlots.right}>{calibSlots.right ? `✓ ${(2*Math.acos(Math.min(1,Math.abs(calibSlots.right.w)))*180/Math.PI).toFixed(0)}°` : '—'}</span>
+          </div>
+        </div>
+
+        <div class="calib-step">
+          <span class="calib-step-label">Step 3 — Pitch axis</span>
+          <p class="calib-desc">Tilt 90° forward (nose down), then click <strong>Front</strong>. Then tilt 90° backward and click <strong>Back</strong>.</p>
+          <div class="calib-row">
+            <button class="calib-btn" onclick={() => captureSlot('front')} disabled={!liveRelQ || liveAngle < 45}>Set Front</button>
+            <span class="calib-check" class:done={calibSlots.front}>{calibSlots.front ? `✓ ${(2*Math.acos(Math.min(1,Math.abs(calibSlots.front.w)))*180/Math.PI).toFixed(0)}°` : '—'}</span>
+            <button class="calib-btn" onclick={() => captureSlot('back')}  disabled={!liveRelQ || liveAngle < 45}>Set Back</button>
+            <span class="calib-check" class:done={calibSlots.back}>{calibSlots.back  ? `✓ ${(2*Math.acos(Math.min(1,Math.abs(calibSlots.back.w)))*180/Math.PI).toFixed(0)}°` : '—'}</span>
+          </div>
+        </div>
+
+        <div class="calib-row">
+          <button class="baseline-btn" onclick={computeAndSaveAxes} disabled={!calibReady}>Compute & Save Axes</button>
+          {#if calibStatus}
+            <span class="calib-check" class:done={calibStatus.ok}>{calibStatus.message}</span>
+          {/if}
+        </div>
+      {/if}
+
+    </div>
+  {/if}
+
   {#if readings.length === 0}
     <p>No readings for this day.</p>
   {:else}
@@ -342,6 +480,31 @@
   .baseline-status { padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.88rem; margin-bottom: 0.75rem; }
   .baseline-status.ok    { background: #dcfce7; color: #166534; }
   .baseline-status.error { background: #fee2e2; color: #991b1b; }
+  .calib-toggle { margin-bottom: 0.5rem; }
+  .calib-open-btn { background: none; border: 1px solid #e2e8f0; border-radius: 4px; padding: 0.3rem 0.75rem; font-size: 0.85rem; cursor: pointer; color: #475569; margin: 0; }
+  .calib-open-btn:hover { background: #f8fafc; }
+  .calib-panel {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.5rem;
+    padding: 0.9rem 1rem; margin-bottom: 0.75rem;
+    display: flex; flex-direction: column; gap: 0.75rem; font-size: 0.88rem;
+  }
+  .calib-step { display: flex; flex-direction: column; gap: 0.4rem; }
+  .calib-step-label { font-weight: 600; color: #1e293b; }
+  .calib-step em { font-weight: 400; color: #94a3b8; font-style: normal; font-size: 0.8rem; }
+  .calib-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .calib-btn { background: #475569; color: white; border: none; border-radius: 4px; padding: 0.3rem 0.8rem; font-size: 0.82rem; cursor: pointer; margin: 0; }
+  .calib-btn:hover:not(:disabled) { background: #334155; }
+  .calib-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .calib-check { font-size: 0.82rem; color: #94a3b8; }
+  .calib-check.done { color: #16a34a; font-weight: 600; }
+  .calib-live { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem 0.8rem; background: white; border: 1px solid #e2e8f0; border-radius: 6px; }
+  .angle-row { display: flex; align-items: center; gap: 0.75rem; }
+  .angle-value { font-size: 1.3rem; font-weight: 700; color: #1e293b; min-width: 3.5rem; font-variant-numeric: tabular-nums; }
+  .angle-track { flex: 1; height: 10px; background: #e2e8f0; border-radius: 5px; position: relative; }
+  .angle-fill { height: 100%; border-radius: 5px; transition: width 0.4s, background 0.4s; }
+  .angle-mark { position: absolute; right: 0; top: -1.2rem; font-size: 0.7rem; color: #94a3b8; }
+  .angle-hint { font-size: 0.8rem; color: #64748b; min-width: 8rem; }
+  .calib-desc { font-size: 0.82rem; color: #64748b; margin: 0 0 0.35rem; }
   .modal-backdrop {
     position: fixed; inset: 0; background: #00000088;
     display: flex; align-items: center; justify-content: center;
