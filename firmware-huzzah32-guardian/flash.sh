@@ -2,7 +2,7 @@
 set -e
 
 FQBN="esp32:esp32:featheresp32"
-PORT="/dev/ttyUSB0"
+PORT="${PORT:-/dev/ttyUSB0}"
 SKETCH="firmware-huzzah32-guardian.ino"
 
 cd "$(dirname "$0")"

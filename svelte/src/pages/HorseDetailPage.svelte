@@ -7,6 +7,7 @@
   import { deviceStatus } from '../services/deviceStatus.js';
   import { collarConfig } from '../services/collarConfig.js';
   import SensorReadingRow from '../components/SensorReadingRow.svelte';
+  import HorseHeadViewer from '../components/HorseHeadViewer.svelte';
   import { formatDate, formatDateOnly } from '../utils/formatDate.js';
 
   let { params = {} } = $props();
@@ -18,6 +19,22 @@
   let selectedDate = $state(todayString());
   let selectedIds = $state(new Set());
   let baselineStatus = $state(null);
+  let viewReading = $state(null);
+  let viewCount = $state(10);
+
+  const viewReadings = $derived.by(() => {
+    if (!viewReading) return [];
+    const idx = readings.findIndex(r => r.id === viewReading.id);
+    if (idx < 0) return [viewReading];
+    const start = Math.max(0, idx - viewCount);
+    return readings.slice(start, idx + 1);
+  });
+
+  const viewMax = $derived.by(() => {
+    if (!viewReading) return 100;
+    const idx = readings.findIndex(r => r.id === viewReading.id);
+    return idx > 0 ? idx : 1;
+  });
 
   const selectedReadings = $derived(readings.filter(r => selectedIds.has(r.id)));
   const avgRoll = $derived(
@@ -30,21 +47,6 @@
     const next = new Set(selectedIds);
     next.has(id) ? next.delete(id) : next.add(id);
     selectedIds = next;
-  }
-
-  function eulerToQuat(pitchDeg, rollDeg, yawDeg) {
-    const p = pitchDeg * Math.PI / 360;
-    const r = rollDeg  * Math.PI / 360;
-    const y = yawDeg   * Math.PI / 360;
-    const cp = Math.cos(p), sp = Math.sin(p);
-    const cr = Math.cos(r), sr = Math.sin(r);
-    const cy = Math.cos(y), sy = Math.sin(y);
-    return {
-      w: cp*cr*cy - sp*sr*sy,
-      x: sp*cr*cy + cp*sr*sy,
-      y: cp*sr*cy - sp*cr*sy,
-      z: cp*cr*sy + sp*sr*cy,
-    };
   }
 
   function averageQuats(quats) {
@@ -60,9 +62,9 @@
   }
 
   async function setOrientationBaseline() {
-    const valid = selectedReadings.filter(r => r.pitch != null && r.roll != null);
+    const valid = selectedReadings.filter(r => r.qw != null);
     if (valid.length === 0) return;
-    const quats = valid.map(r => eulerToQuat(r.pitch, r.roll, r.yaw ?? 0));
+    const quats = valid.map(r => ({ w: r.qw, x: r.qx, y: r.qy, z: r.qz }));
     const avg = averageQuats(quats);
     baselineStatus = null;
     try {
@@ -237,12 +239,7 @@
           <th></th>
           <th>Time</th>
           <th>State</th>
-          <th>Pitch</th>
           <th>Roll</th>
-          <th>Yaw</th>
-          <th>Side</th>
-          <th>Horse Roll~</th>
-          <th>Tilt</th>
           <th>Accel</th>
           <th>Gyro</th>
           <th>Temp</th>
@@ -265,11 +262,29 @@
             selected={selectedIds.has(reading.id)}
             ontoggle={() => toggleSelect(reading.id)}
             ondelete={() => remove(reading.id)}
+            onview={() => viewReading = reading}
           />
         {/each}
       </tbody>
     </table>
   {/if}
+{#if viewReading}
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="modal-backdrop" role="dialog" onclick={() => viewReading = null}
+      onkeydown={(e) => e.key === 'Escape' && (viewReading = null)}>
+    <div class="modal-box" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-header">
+        <span>{formatDate(viewReading.timestamp)}</span>
+        <button class="modal-close" onclick={() => viewReading = null}>✕</button>
+      </div>
+      <HorseHeadViewer readings={viewReadings} {config} />
+      <div class="modal-slider">
+        <label for="viewCount">Loop over last <strong>{viewCount}</strong> readings</label>
+        <input id="viewCount" type="range" min="1" max={viewMax} bind:value={viewCount} />
+      </div>
+    </div>
+  </div>
+{/if}
 </main>
 
 <style>
@@ -327,4 +342,30 @@
   .baseline-status { padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.88rem; margin-bottom: 0.75rem; }
   .baseline-status.ok    { background: #dcfce7; color: #166534; }
   .baseline-status.error { background: #fee2e2; color: #991b1b; }
+  .modal-backdrop {
+    position: fixed; inset: 0; background: #00000088;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .modal-box {
+    background: #0f172a; border-radius: 12px;
+    box-shadow: 0 8px 40px #0008; overflow: hidden;
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.6rem 0.9rem; background: #1e293b; color: #e2e8f0;
+    font-size: 0.85rem; font-family: monospace;
+  }
+  .modal-close {
+    background: none; border: none; color: #94a3b8;
+    font-size: 1rem; cursor: pointer; padding: 0 0.2rem; margin: 0;
+  }
+  .modal-close:hover { color: #f1f5f9; }
+  .modal-slider {
+    padding: 0.6rem 1rem 0.8rem;
+    background: #1e293b;
+    display: flex; flex-direction: column; gap: 0.4rem;
+  }
+  .modal-slider label { font-size: 0.8rem; color: #94a3b8; font-family: monospace; }
+  .modal-slider input[type=range] { width: 100%; accent-color: #0ea5e9; }
 </style>

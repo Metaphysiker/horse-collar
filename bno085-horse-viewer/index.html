@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Horse Head — BNO085</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      gap: 12px;
+    }
+    canvas { border-radius: 10px; box-shadow: 0 0 40px #0ea5e955; }
+    #controls { display: flex; gap: 10px; }
+    button {
+      padding: 8px 20px;
+      background: #0ea5e9;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { background: #0284c7; }
+    button#resetBtn { background: #475569; }
+    button#resetBtn:hover { background: #334155; }
+    #status { font-size: 13px; color: #94a3b8; }
+    #quat { font-size: 12px; color: #64748b; letter-spacing: 0.05em; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <button id="connectBtn">Connect BNO085</button>
+    <button id="resetBtn">Reset orientation</button>
+  </div>
+  <div id="status">Not connected — open in Chrome and connect via serial</div>
+  <canvas id="canvas"></canvas>
+  <div id="quat">w:— x:— y:— z:—</div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <script>
+    // ── Scene ────────────────────────────────────────────────────────────────
+    const canvas = document.getElementById('canvas');
+    const W = 480, H = 480;
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(W, H);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f172a);
+
+    const camera = new THREE.PerspectiveCamera(42, W / H, 0.1, 100);
+    camera.position.set(0, 0.4, 3.2);
+    camera.lookAt(0, 0, 0);
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const sun = new THREE.DirectionalLight(0xfff5e0, 1.0);
+    sun.position.set(4, 6, 5);
+    sun.castShadow = true;
+    scene.add(sun);
+    const fill = new THREE.DirectionalLight(0x4488cc, 0.3);
+    fill.position.set(-4, -2, -4);
+    scene.add(fill);
+
+    // Ground grid for reference
+    const grid = new THREE.GridHelper(4, 8, 0x1e3a5f, 0x1e3a5f);
+    grid.position.y = -1.2;
+    scene.add(grid);
+
+    // ── Horse head geometry ──────────────────────────────────────────────────
+    const head = new THREE.Group();
+
+    const coat    = new THREE.MeshPhongMaterial({ color: 0x8b6914, shininess: 20 });
+    const dark    = new THREE.MeshPhongMaterial({ color: 0x4a3200, shininess: 10 });
+    const black   = new THREE.MeshPhongMaterial({ color: 0x0d0d0d });
+    const white   = new THREE.MeshPhongMaterial({ color: 0xf0ead6 });
+
+    // Skull
+    const skull = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.80, 1.0), coat);
+    skull.position.set(0, 0.08, -0.05);
+    head.add(skull);
+
+    // Muzzle — slightly narrower, extends forward
+    const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.46, 0.72), coat);
+    muzzle.position.set(0, -0.28, 0.56);
+    head.add(muzzle);
+
+    // Nostrils
+    function addNostril(x) {
+      const g = new THREE.CylinderGeometry(0.07, 0.075, 0.06, 10);
+      const m = new THREE.Mesh(g, dark);
+      m.rotation.x = Math.PI / 2;
+      m.position.set(x, -0.34, 0.93);
+      head.add(m);
+    }
+    addNostril(-0.13); addNostril(0.13);
+
+    // Eyes
+    function addEye(x) {
+      const eyeball = new THREE.Mesh(new THREE.SphereGeometry(0.09, 14, 14), black);
+      eyeball.position.set(x, 0.14, 0.35);
+      head.add(eyeball);
+      const highlight = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 8), white);
+      highlight.position.set(x * 0.85, 0.17, 0.43);
+      head.add(highlight);
+    }
+    addEye(-0.37); addEye(0.37);
+
+    // Ears — tapered boxes
+    function addEar(x) {
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.10, 0.38, 5), coat);
+      ear.position.set(x, 0.64, -0.18);
+      ear.rotation.z = x < 0 ? 0.12 : -0.12;
+      head.add(ear);
+      const inner = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.26, 5), dark);
+      inner.position.set(x, 0.65, -0.16);
+      inner.rotation.z = x < 0 ? 0.12 : -0.12;
+      head.add(inner);
+    }
+    addEar(-0.22); addEar(0.22);
+
+    // Forelock (tuft of mane between ears)
+    for (let i = 0; i < 4; i++) {
+      const strand = new THREE.Mesh(
+        new THREE.BoxGeometry(0.10, 0.22 + i * 0.04, 0.08),
+        dark
+      );
+      strand.position.set((i - 1.5) * 0.11, 0.68 + i * 0.02, 0.05 - i * 0.04);
+      strand.rotation.z = (i - 1.5) * 0.08;
+      head.add(strand);
+    }
+
+    // Neck stump
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.38, 0.55, 8), coat);
+    neck.position.set(0, -0.60, -0.22);
+    neck.rotation.x = 0.25;
+    head.add(neck);
+
+    scene.add(head);
+
+    // ── Quaternion / rotation ────────────────────────────────────────────────
+    const currentQ = new THREE.Quaternion();
+    const targetQ  = new THREE.Quaternion();
+    let   offsetQ  = new THREE.Quaternion();
+    let   lastRawQ = new THREE.Quaternion();
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      offsetQ = lastRawQ.clone().invert();
+    });
+
+    // ── Render loop ──────────────────────────────────────────────────────────
+    (function animate() {
+      requestAnimationFrame(animate);
+      currentQ.slerp(targetQ, 0.12);
+      head.quaternion.copy(currentQ);
+      renderer.render(scene, camera);
+    })();
+
+    // ── WebSerial ────────────────────────────────────────────────────────────
+    let port = null;
+
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+      if (port) {
+        try { await port.close(); } catch (_) {}
+        port = null;
+        setStatus('Disconnected', false);
+        document.getElementById('connectBtn').textContent = 'Connect BNO085';
+        return;
+      }
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        document.getElementById('connectBtn').textContent = 'Disconnect';
+        setStatus('Connected', true);
+        readLoop();
+      } catch (e) {
+        setStatus('Error: ' + e.message, false);
+      }
+    });
+
+    async function readLoop() {
+      const decoder = new TextDecoderStream();
+      port.readable.pipeTo(decoder.writable);
+      const reader = decoder.readable.getReader();
+      let buf = '';
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += value;
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          lines.forEach(parseLine);
+        }
+      } catch (_) {
+        setStatus('Connection lost', false);
+        document.getElementById('connectBtn').textContent = 'Connect BNO085';
+        port = null;
+      }
+    }
+
+    function parseLine(line) {
+      const m = line.match(/Quaternion:\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)/);
+      if (!m) return;
+      const w = +m[1], x = +m[2], y = +m[3], z = +m[4];
+      // BNO085: (real=w, i=x, j=y, k=z) → THREE: set(x, y, z, w)
+      const raw = new THREE.Quaternion(x, y, z, w);
+      lastRawQ.copy(raw);
+      targetQ.copy(offsetQ).multiply(raw);
+      document.getElementById('quat').textContent =
+        `w:${w.toFixed(3)}  x:${x.toFixed(3)}  y:${y.toFixed(3)}  z:${z.toFixed(3)}`;
+    }
+
+    function setStatus(msg, ok) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.style.color = ok ? '#4ade80' : '#94a3b8';
+    }
+  </script>
+</body>
+</html>

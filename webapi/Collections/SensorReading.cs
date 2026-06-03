@@ -22,7 +22,7 @@ public class SensorReading
     public float TiltDeg { get; set; }
     public float Acceleration { get; set; }
     public float AngularVelocity { get; set; }
-    public float Temperature { get; set; }
+    public float? Temperature { get; set; }
     public string? AlertReason { get; set; }
     public string Activity { get; set; } = string.Empty;
     public HorseState State { get; set; }

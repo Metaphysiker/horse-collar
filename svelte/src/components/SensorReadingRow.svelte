@@ -2,8 +2,14 @@
   import { fly } from 'svelte/transition';
   import { formatDate } from '../utils/formatDate.js';
 
-  let { reading, config = null, selected = false, ontoggle, ondelete } = $props();
+  let { reading, config = null, selected = false, ontoggle, ondelete, onview } = $props();
 
+  /**
+   * @param {number} qw
+   * @param {number} qx
+   * @param {number} qy
+   * @param {number} qz
+   */
   function applyBaseline(qw, qx, qy, qz) {
     const rw =  (config?.refQw ?? 1);
     const rx = -(config?.refQx ?? 0);
@@ -23,6 +29,19 @@
       : null
   );
 
+  const horseRoll = $derived.by(() => {
+    if (!relQ) return null;
+    const rollDeg = Math.asin(Math.max(-1, Math.min(1, 2*(relQ.w*relQ.y - relQ.z*relQ.x)))) * 180 / Math.PI;
+    const abs = Math.abs(rollDeg);
+    const side = rollDeg > 0 ? 'Left' : 'Right';
+    const deg = rollDeg.toFixed(1);
+    if (abs < 22.5) return { label: 'Normal',                      color: '#22c55e', deg };
+    if (abs < 45)   return { label: `Slight-${side.toLowerCase()}`, color: '#84cc16', deg };
+    if (abs < 67.5) return { label: `Half-${side.toLowerCase()}`,   color: '#f59e0b', deg };
+    return                 { label: side,                           color: '#ef4444', deg };
+  });
+
+  /** @type {Record<string, string>} */
   const stateColors = {
     Calm:    '#22c55e',
     Moving:  '#3b82f6',
@@ -30,6 +49,7 @@
     Rolling: '#ef4444',
   };
 
+  /** @type {Record<string, string>} */
   const alarmColors = {
     Alert:     '#f97316',
     Emergency: '#dc2626',
@@ -38,24 +58,10 @@
   const color = $derived(stateColors[reading.state] ?? '#888');
   const alarmColor = $derived(alarmColors[reading.alarmState] ?? null);
 
-  function horseSide(roll) {
-    if (roll == null) return null;
-    if (roll > 40)  return { label: 'Left',  color: '#a855f7' };
-    if (roll < -30) return { label: 'Right', color: '#ec4899' };
-    return null;
-  }
-
-  // Linear calibration: sensor +5° = horse 0°, +72° = horse +90°, -65° = horse -90°
-  function horseRoll(roll) {
-    if (roll == null) return null;
-    const deg = roll >= 5
-      ? (roll - 5) / 67 * 90
-      : (roll - 5) / 70 * 90;
-    return Math.max(-90, Math.min(90, deg));
-  }
 </script>
 
-<tr in:fly={{ y: -16, duration: 250 }} class:selected>
+<tr in:fly={{ y: -16, duration: 250 }} class:selected class:viewable={!!onview}
+    onclick={(e) => { if (!(e.target instanceof Element) || !e.target.closest('input,button')) onview?.(); }}>
   <td><input type="checkbox" checked={selected} onchange={ontoggle} /></td>
   <td>{formatDate(reading.timestamp)}</td>
   <td>
@@ -67,19 +73,14 @@
       <span class="reason">{reading.alertReason}</span>
     {/if}
   </td>
-  <td>{reading.pitch?.toFixed(1)}°</td>
-  <td>{reading.roll?.toFixed(1)}°</td>
-  <td>{reading.yaw?.toFixed(1) ?? '—'}°</td>
   <td>
-    {#if horseSide(reading.roll)}
-      {@const side = horseSide(reading.roll)}
-      <span class="badge" style="background:{side.color}">{side.label}</span>
+    {#if horseRoll}
+      <span class="roll-badge" style="background:{horseRoll.color}">{horseRoll.label}</span>
+      <span class="roll-deg">{horseRoll.deg}°</span>
     {:else}
       <span class="upright">—</span>
     {/if}
   </td>
-  <td class="horse-roll">{horseRoll(reading.roll)?.toFixed(0) ?? '—'}°</td>
-  <td>{(reading.pitch != null && reading.roll != null) ? Math.sqrt(reading.pitch**2 + reading.roll**2).toFixed(1) : '—'}°</td>
   <td>{reading.acceleration?.toFixed(2)}</td>
   <td>{reading.angularVelocity?.toFixed(2) ?? '—'}</td>
   <td>{reading.temperature != null ? reading.temperature.toFixed(1) + '°' : '—'}</td>
@@ -107,8 +108,19 @@
     font-size: 0.8rem;
     font-weight: 600;
   }
+  .viewable { cursor: pointer; }
+  .viewable:hover { background: #f8fafc; }
   .upright { color: #cbd5e1; }
-  .horse-roll { color: #7c3aed; font-weight: 500; }
+  .roll-deg { font-size: 0.75rem; color: #64748b; margin-left: 0.3rem; }
+  .roll-badge {
+    display: inline-block;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    color: white;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
   .reason {
     display: block;
     font-size: 0.72rem;

@@ -7,11 +7,13 @@
 #include <time.h>
 #include "config.infomaniak.h"  // swap to config.development.h for local development
 
+// #define DEBUG_QUATERNION   // uncomment to stream quaternion to Adafruit WebSerial 3D viewer
+
 #define BATTERY_PIN     A13
 #define WIFI_TIMEOUT_MS 15000
 #define NTP_TIMEOUT_MS  10000
 #define HTTP_TIMEOUT_MS 5000
-#define MAX_BUFFER      200   // max buffered readings in RTC (~6400 bytes)
+#define MAX_BUFFER      150   // max buffered readings in RTC — reduced to fit quaternion fields
 
 enum HorseState { Calm, Tilted, Moving, Rolling };
 enum AlarmState { NoAlarm, Alert, Emergency };
@@ -31,6 +33,7 @@ struct BufferedReading {
   float    acceleration;
   float    angularVelocity;
   int16_t  stillCycles;
+  int16_t  qw, qx, qy, qz;  // quaternion scaled ×32767, fits in int16_t since components ∈ [-1,1]
   uint8_t  state;
   uint8_t  alarmState;
   uint8_t  alertReasonIdx;   // 0=none, 1=BaselineShift, 2=SuddenFall, 3=ActivityCollapse, 4=ColicRolling
@@ -68,7 +71,7 @@ RTC_DATA_ATTR float emaRoll              = 0;
 RTC_DATA_ATTR int   settledCycles        = 0;
 
 // Buffer — increment BUFFER_VERSION whenever BufferedReading struct changes
-#define BUFFER_VERSION 3
+#define BUFFER_VERSION 4
 RTC_DATA_ATTR uint8_t         bufferVersion = 0;
 RTC_DATA_ATTR int             bufferCount   = 0;
 RTC_DATA_ATTR BufferedReading buffer[MAX_BUFFER];
@@ -289,9 +292,9 @@ bool initBno() {
 
 void readSensor() {
   sh2_SensorValue_t event;
-  bool gotRotation = false, gotAccel = false;
+  bool gotRotation = false, gotAccel = false, gotGyro = false;
   unsigned long start = millis();
-  while (millis() - start < 3000 && (!gotRotation || !gotAccel)) {
+  while (millis() - start < 3000 && (!gotRotation || !gotAccel || !gotGyro)) {
     if (bno.getSensorEvent(&event)) {
       if (event.sensorId == SH2_ROTATION_VECTOR) {
         curQw = event.un.rotationVector.real;
@@ -302,6 +305,9 @@ void readSensor() {
         roll  = asin(constrain(2*(curQw*curQy - curQz*curQx), -1.0f, 1.0f)) * 180.0f / PI;
         yaw   = atan2(2*(curQw*curQz + curQx*curQy), 1 - 2*(curQy*curQy + curQz*curQz)) * 180.0f / PI;
         gotRotation = true;
+#ifdef DEBUG_QUATERNION
+        Serial.printf("Quaternion: %.4f, %.4f, %.4f, %.4f\n", curQw, curQx, curQy, curQz);
+#endif
       }
       if (event.sensorId == SH2_LINEAR_ACCELERATION) {
         acceleration = sqrt(
@@ -317,6 +323,7 @@ void readSensor() {
           pow(event.un.gyroscope.y, 2) +
           pow(event.un.gyroscope.z, 2)
         );
+        gotGyro = true;
       }
     } else {
       delay(5);
@@ -525,6 +532,10 @@ void pushToBuffer(HorseState state) {
   r.acceleration    = acceleration;
   r.angularVelocity = angularVelocity;
   r.stillCycles     = (int16_t)stillCycles;
+  r.qw              = (int16_t)(curQw * 32767.0f);
+  r.qx              = (int16_t)(curQx * 32767.0f);
+  r.qy              = (int16_t)(curQy * 32767.0f);
+  r.qz              = (int16_t)(curQz * 32767.0f);
   r.state           = (uint8_t)state;
   r.alarmState      = (uint8_t)alarmState;
   r.alertReasonIdx  = alertReasonToIdx(alertReason);
@@ -546,6 +557,10 @@ void flushBuffer() {
     obj["acceleration"]    = r.acceleration;
     obj["angularVelocity"] = r.angularVelocity;
     obj["lyingCycles"]     = r.stillCycles;
+    obj["qw"]              = r.qw / 32767.0f;
+    obj["qx"]              = r.qx / 32767.0f;
+    obj["qy"]              = r.qy / 32767.0f;
+    obj["qz"]              = r.qz / 32767.0f;
     obj["state"]           = stateToString((HorseState)r.state);
     obj["alarmState"]      = alarmStateToString((AlarmState)r.alarmState);
     obj["activity"]        = r.acceleration > ACCEL_MOVING ? "moving" : "stable";
