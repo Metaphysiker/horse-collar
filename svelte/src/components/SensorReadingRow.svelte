@@ -2,7 +2,15 @@
   import { fly } from 'svelte/transition';
   import { formatDate } from '../utils/formatDate.js';
 
-  let { reading, config = null, selected = false, ontoggle, ondelete, onview } = $props();
+  let { reading, config = null, selected = false, dtSec = null, ontoggle, ondelete, onview } = $props();
+
+  function fmtDt(s /** @type {number|null} */) {
+    if (s == null) return '—';
+    if (s < 60)   return `${s}s`;
+    const m = Math.floor(s / 60), r = s % 60;
+    return r ? `${m}m ${r}s` : `${m}m`;
+  }
+  const dtColor = $derived(dtSec == null ? '#94a3b8' : dtSec > 120 ? '#ef4444' : dtSec > 30 ? '#f59e0b' : '#94a3b8');
 
   /**
    * @param {number} qw
@@ -67,6 +75,7 @@
     onclick={(e) => { if (!(e.target instanceof Element) || !e.target.closest('input,button')) onview?.(); }}>
   <td><input type="checkbox" checked={selected} onchange={ontoggle} /></td>
   <td>{formatDate(reading.timestamp)}</td>
+  <td class="dt" style="color:{dtColor}">{fmtDt(dtSec)}</td>
   <td>
     <span class="badge" style="background:{color}">{reading.state}</span>
     {#if alarmColor}
@@ -113,6 +122,7 @@
   }
   .viewable { cursor: pointer; }
   .viewable:hover { background: #f8fafc; }
+  .dt { font-size: 0.78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .upright { color: #cbd5e1; }
   .roll-deg { font-size: 0.75rem; color: #64748b; margin-left: 0.3rem; }
   .roll-badge {

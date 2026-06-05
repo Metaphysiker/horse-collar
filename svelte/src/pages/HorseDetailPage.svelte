@@ -376,6 +376,7 @@
         <tr>
           <th></th>
           <th>Time</th>
+          <th>Δt</th>
           <th>State</th>
           <th>Roll</th>
           <th>Accel</th>
@@ -393,10 +394,13 @@
         </tr>
       </thead>
       <tbody>
-        {#each [...readings].reverse() as reading (reading.id)}
+        {#each [...readings].reverse() as reading, i (reading.id)}
+          {@const prev = readings[readings.length - 2 - i]}
+          {@const dtSec = prev ? Math.round((new Date(reading.timestamp) - new Date(prev.timestamp)) / 1000) : null}
           <SensorReadingRow
             {reading}
             {config}
+            {dtSec}
             selected={selectedIds.has(reading.id)}
             ontoggle={() => toggleSelect(reading.id)}
             ondelete={() => remove(reading.id)}
