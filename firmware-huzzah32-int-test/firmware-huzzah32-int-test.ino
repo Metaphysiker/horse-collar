@@ -146,7 +146,7 @@ void setup() {
   }
   Serial.println(F("[OK] BNO085 initialised"));
 
-  if (!bno.enableReport(SH2_ROTATION_VECTOR, 20000)) {  // 50 Hz
+  if (!bno.enableReport(SH2_ROTATION_VECTOR, 100000)) {
     Serial.println(F("[ERROR] Could not enable ROTATION_VECTOR. Halting."));
     while (true) delay(1000);
   }
