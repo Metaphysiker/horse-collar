@@ -22,7 +22,7 @@
 const float LYING_THRESHOLD = 75.0f;
 const float STANDING_THRESHOLD = 45.0f;
 
-const uint32_t SENSOR_INTERVAL = 5000000;  // microseconds
+const uint32_t SENSOR_INTERVAL = 10000;  // microseconds
 
 // -------------------- WIFI --------------------
 
@@ -148,12 +148,15 @@ void setup() {
     while (1) delay(10);
   }
 
-  delay(100); // give sensor time to settle
+  delay(1000);  // give sensor time to settle
 
 
-  bno08x.enableReport(SH2_ROTATION_VECTOR, SENSOR_INTERVAL);
-  bno08x.enableReport(SH2_LINEAR_ACCELERATION, SENSOR_INTERVAL);
-  bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, SENSOR_INTERVAL);
+  Serial.println("Enabling reports...");
+  bool ok1 = bno08x.enableReport(SH2_ROTATION_VECTOR, SENSOR_INTERVAL);
+  bool ok2 = bno08x.enableReport(SH2_LINEAR_ACCELERATION, SENSOR_INTERVAL);
+  bool ok3 = bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, SENSOR_INTERVAL);
+
+  Serial.printf("RV=%d ACC=%d GYRO=%d\n", ok1, ok2, ok3);
 
   pinMode(BNO_INT_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(BNO_INT_PIN), bnoISR, FALLING);
@@ -182,20 +185,21 @@ void IRAM_ATTR bnoISR() {
 // -------------------- LOOP --------------------
 
 void loop() {
-
+  Serial.printf("sensorId=%d\n", event.sensorId);
   if (postureChanged) {
+    Serial.println("Posture changed — sending update");
     postureChanged = false;
     connectWifi();
     sendPostureChange();
     disconnectWifi();
   }
 
-    // Heartbeat
+  // Heartbeat
   unsigned long now = millis();
   if (now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
     lastHeartbeatMs = now;
     connectWifi();
-    sendHeartbeat();
+    //sendHeartbeat();
     disconnectWifi();
   }
 
@@ -206,15 +210,16 @@ void loop() {
   interrupts();
 
   if (!hasData) {
-    Serial.println("Light sleep start");
+    Serial.println("No new data — sleeping");
     esp_light_sleep_start();
     return;
   }
 
+  Serial.println("New sensor data ready — reading...");
+
 
   while (bno08x.getSensorEvent(&event)) {
-
-      Serial.printf("sensorId: %d\n", event.sensorId);
+    Serial.printf("EVENT: id=%d\n", event.sensorId);
 
     if (event.sensorId == SH2_ROTATION_VECTOR) {
 
@@ -298,14 +303,12 @@ Posture detectPosture(float gz) {
   switch (posture) {
     case STANDING:
       if (gz < cos(LYING_THRESHOLD * PI / 180.0f)) {
-        Serial.println(">> LYING");
         postureChanged = true;
         return LYING;
       }
       break;
     case LYING:
       if (gz > cos(STANDING_THRESHOLD * PI / 180.0f)) {
-        Serial.println(">> STANDING");
         postureChanged = true;
         return STANDING;
       }
@@ -327,12 +330,10 @@ bool ensureWifi() {
   unsigned long start = millis();
   while (millis() - start < WIFI_TIMEOUT_MS) {
     if (wifiMulti.run() == WL_CONNECTED) {
-      Serial.println("WiFi connected: " + WiFi.SSID());
       return true;
     }
     delay(500);
   }
-  Serial.println("WiFi failed");
   return false;
 }
 
@@ -346,18 +347,15 @@ void disconnectWifi() {
 void syncTime() {
   if (!ensureWifi()) return;
   configTime(TZ_OFFSET, 0, NTP_SERVER);
-  Serial.print("Syncing time");
   unsigned long start = millis();
   time_t now = 0;
   while (millis() - start < NTP_TIMEOUT_MS) {
     time(&now);
     if (now > 100000) {
       timeSynced = true;
-      Serial.println(" done");
       return;
     }
     delay(500);
-    Serial.print(".");
   }
   Serial.println(" failed");
 }
@@ -384,11 +382,6 @@ void fetchConfig() {
     refQz = doc["refQz"] | refQz;
     refQw = doc["refQw"] | refQw;
 
-    Serial.printf("Config: sendEveryN=%d  refQ=(%.3f,%.3f,%.3f,%.3f)\n",
-                  sendEveryN,
-                  refQx, refQy,
-                  refQz, refQw);
-
     if (doc["reboot"] | false) {
       post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/reboot/clear", "{}");
       Serial.println("Remote reboot triggered");
@@ -407,7 +400,6 @@ void sendPostureChange() {
 
 bool get(const String& url) {
   if (!ensureWifi()) return false;
-  Serial.println("GET " + url);
 
   HTTPClient http;
   WiFiClientSecure secureClient;
@@ -423,7 +415,7 @@ bool get(const String& url) {
     http.end();
     return false;
   }
-  Serial.printf("  → %d\n", code);
+
   if (code < 200 || code >= 300) {
     Serial.println("  → Body: " + http.getString());
     http.end();
@@ -435,7 +427,6 @@ bool get(const String& url) {
 
 bool post(const String& url, const String& body) {
   if (!ensureWifi()) return false;
-  Serial.println("POST " + url);
 
   HTTPClient http;
   WiFiClientSecure secureClient;
@@ -452,7 +443,6 @@ bool post(const String& url, const String& body) {
     http.end();
     return false;
   }
-  Serial.printf("  → %d\n", code);
   if (code < 200 || code >= 300) {
     Serial.println("  → Body: " + http.getString());
     http.end();
