@@ -39,6 +39,14 @@ public class SensorReadingsController(IMongoDatabase db, HorseService horseServi
         return Created();
     }
 
+
+    [HttpGet("posture-change")]
+    public async Task<IActionResult> PostureChange(string horseId)
+    {
+        await ntfy.NotifyAsync(horseId, AlarmState.Alert, $"[PostureChange]");
+        return Ok();
+    }
+
     [HttpPost("batch")]
     public async Task<IActionResult> CreateBatch(string horseId, [FromBody] List<SensorReading> readings)
     {
