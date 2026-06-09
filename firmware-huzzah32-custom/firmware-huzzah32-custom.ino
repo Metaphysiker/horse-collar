@@ -6,6 +6,8 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include "config.h"
+
 
 // -------------------- CONFIG --------------------
 
@@ -13,10 +15,6 @@
 #define WIFI_TIMEOUT_MS 15000
 #define HTTP_TIMEOUT_MS 5000
 #define NTP_TIMEOUT_MS 10000
-#define NTP_SERVER "pool.ntp.org"
-#define TZ_OFFSET 3600  // UTC+1 (Switzerland)
-#define SERVER_URL "https://horse-collar.sandro-raess.ch/api"
-#define HORSE_ID "6a120cd3377aa365b26a8cf8"
 #define HEARTBEAT_INTERVAL_MS 60000
 
 const float LYING_THRESHOLD = 75.0f;
@@ -25,11 +23,6 @@ const float STANDING_THRESHOLD = 45.0f;
 const uint32_t SENSOR_INTERVAL = 10000;  // microseconds
 
 // -------------------- WIFI --------------------
-
-const char* wifiNetworks[][2] = {
-  { "RUT241_C041", "Xf9u1H2E" },
-  { "Stop Animal Cruelty - Go Vegan", "Rmt4ypnnjN7vcxnh" }
-};
 
 WiFiMulti wifiMulti;
 
@@ -56,7 +49,7 @@ Quaternion multiply(const Quaternion& a, const Quaternion& b) {
 
 struct SensorReadingV2 {
     String horseId;
-    unsigned long timestamp;
+    String timestamp;
 
     float qw = 1.0f;
     float qx = 0.0f;
@@ -70,7 +63,7 @@ struct SensorReadingV2 {
     String readingType;
 
     void toJson(JsonObject obj) const {
-        obj["horseId"] = horseId;
+        obj["horseId"] = HORSE_ID;
         obj["timestamp"] = timestamp;
 
         obj["qw"] = qw;
@@ -191,6 +184,7 @@ bool post(const String& url, const String& body);
 void IRAM_ATTR bnoISR();
 void sendHeartbeat();
 bool sendReading(const SensorReadingV2Dto& dto);
+String isoTimestamp();
 
 
 // -------------------- SETUP --------------------
@@ -222,8 +216,8 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(BNO_INT_PIN), bnoISR, FALLING);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)BNO_INT_PIN, 0);
 
-  for (auto& n : wifiNetworks)
-    wifiMulti.addAP(n[0], n[1]);
+  for (auto& n : WIFI_NETWORKS)
+    wifiMulti.addAP(n.ssid, n.password);
 
   if (firstBoot) {
     firstBoot = false;
@@ -245,6 +239,12 @@ void IRAM_ATTR bnoISR() {
 // -------------------- LOOP --------------------
 
 void loop() {
+  currentSensorReadingV2Dto.rawReading = SensorReadingV2();
+  currentSensorReadingV2Dto.normalizedReading = SensorReadingV2();
+  String ts = isoTimestamp();
+  currentSensorReadingV2Dto.rawReading.timestamp = ts;
+  currentSensorReadingV2Dto.normalizedReading.timestamp = ts;
+
   Serial.printf("sensorId=%d\n", event.sensorId);
   if (postureChanged) {
     Serial.println("Posture changed — sending update");
@@ -284,8 +284,8 @@ void loop() {
     if (event.sensorId == SH2_ROTATION_VECTOR) {
 
       currentSensorReadingV2Dto.rawReading.readingType = "Raw";
-      currentSensorReadingV2Dto.rawReading.horseId = horseId;
-      currentSensorReadingV2Dto.rawReading.timestamp = millis();
+      currentSensorReadingV2Dto.rawReading.horseId = HORSE_ID;
+      currentSensorReadingV2Dto.rawReading.timestamp = isoTimestamp();
       currentSensorReadingV2Dto.rawReading.qx = event.un.rotationVector.i;
       currentSensorReadingV2Dto.rawReading.qy = event.un.rotationVector.j;
       currentSensorReadingV2Dto.rawReading.qz = event.un.rotationVector.k;
@@ -326,8 +326,8 @@ void loop() {
       SensorReading adjusted = getAdjustedReading(currentReading);
 
       currentSensorReadingV2Dto.normalizedReading.readingType = "Normalized";
-      currentSensorReadingV2Dto.normalizedReading.horseId = horseId;
-      currentSensorReadingV2Dto.normalizedReading.timestamp = millis();
+      currentSensorReadingV2Dto.normalizedReading.horseId = HORSE_ID;
+      currentSensorReadingV2Dto.normalizedReading.timestamp = isoTimestamp();
       currentSensorReadingV2Dto.normalizedReading.qx = adjusted.qx;
       currentSensorReadingV2Dto.normalizedReading.qy = adjusted.qy;
       currentSensorReadingV2Dto.normalizedReading.qz = adjusted.qz;
@@ -335,6 +335,7 @@ void loop() {
       currentSensorReadingV2Dto.normalizedReading.acceleration = adjusted.acceleration;
       currentSensorReadingV2Dto.normalizedReading.angularVelocity = adjusted.angularVelocity;
 
+      Serial.println("Before sending:");
       sendReading(currentSensorReadingV2Dto);
 
       float qw = adjusted.qw;
@@ -405,7 +406,8 @@ Posture detectPosture(float gz) {
 }
 
 bool sendReading(const SensorReadingV2Dto& dto) {
-  String url = String(SERVER_URL) + "/v2/horses/" + HORSE_ID + "/readings";
+  String url = String(SERVER_URL) + "/v2/horses/" + HORSE_ID + "/readings/from-dto";
+  Serial.println("Sending reading to " + url);
   return post(url, dto.toJson());
 }
 
@@ -530,6 +532,9 @@ bool post(const String& url, const String& body) {
   http.addHeader("Content-Type", "application/json");
 
   int code = http.POST(body);
+  Serial.println(code);
+  Serial.println("→ Sending JSON:");
+  Serial.println(body);
   if (code < 0) {
     Serial.println("  → failed: " + http.errorToString(code));
     http.end();
@@ -546,4 +551,17 @@ bool post(const String& url, const String& body) {
 
 void sendHeartbeat() {
   get(String(SERVER_URL) + "/horses/" + HORSE_ID + "/heartbeat");
+}
+
+String isoTimestamp() {
+  time_t now;
+  time(&now);
+
+  struct tm t;
+  gmtime_r(&now, &t);
+
+  char buf[30];
+  strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &t);
+
+  return String(buf);
 }

@@ -22,8 +22,10 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
         return results;
     }
 
-    [HttpPost("/{horseId}/from-dto")]
-    public async Task<IActionResult> CreateFromDto(string horseId, SensorReadingV2Dto readingDto)
+    [HttpPost("from-dto")]
+    public async Task<IActionResult> CreateFromDto(
+    [FromRoute] string horseId,
+    [FromBody] SensorReadingV2Dto readingDto)
     {
         await horseService.EnsureExistsAsync(horseId);
         if(readingDto.rawReading is not null)
@@ -65,11 +67,5 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
             });
         }
         return Created();
-    }
-
-    [HttpGet]
-    public async Task<ICollection<SensorReadingV2>> GetAll(string horseId)
-    {
-        return await _readings.Find(r => r.HorseId == horseId).ToListAsync();
     }
 }
