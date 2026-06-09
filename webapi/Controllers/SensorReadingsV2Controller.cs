@@ -5,11 +5,11 @@ using MongoDB.Driver;
 [Route("v2/horses/{horseId}/readings")]
 public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseService, NtfyService ntfy) : ControllerBase
 {
-    private readonly IMongoCollection<SensorReading> _readings = db.GetCollection<SensorReading>("sensorReadings");
+    private readonly IMongoCollection<SensorReadingV2> _readings = db.GetCollection<SensorReadingV2>("sensorReadingsV2");
     private readonly IMongoCollection<CollarConfig> _configs = db.GetCollection<CollarConfig>("collarConfigs");
 
     [HttpGet]
-    public async Task<List<SensorReading>> GetByHorse(string horseId, [FromQuery] DateOnly? date, [FromQuery] int? limit)
+    public async Task<List<SensorReadingV2>> GetByHorse(string horseId, [FromQuery] DateOnly? date, [FromQuery] int? limit)
     {
         var day = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
         var from = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
@@ -31,7 +31,7 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
             var raw = readingDto.rawReading;
             raw.HorseId = horseId;
             raw.ReadingType = raw.ReadingType ?? ReadingType.Raw.ToString();
-            await _readings.InsertOneAsync(new SensorReading
+            await _readings.InsertOneAsync(new SensorReadingV2
             {
                 HorseId = raw.HorseId,
                 Timestamp = raw.Timestamp,
@@ -42,9 +42,7 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
                 Acceleration = raw.Acceleration,
                 AngularVelocity = raw.AngularVelocity,
                 AlertReason = raw.AlertReason,
-                Activity = string.Empty,
-                State = HorseState.Calm,
-                AlarmState = AlarmState.None
+                ReadingType = raw.ReadingType,
             });
         }
         if(readingDto.normalizedReading is not null)
@@ -52,7 +50,7 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
             var norm = readingDto.normalizedReading;
             norm.HorseId = horseId;
             norm.ReadingType = norm.ReadingType ?? ReadingType.Normalized.ToString();
-            await _readings.InsertOneAsync(new SensorReading
+            await _readings.InsertOneAsync(new SensorReadingV2
             {
                 HorseId = norm.HorseId,
                 Timestamp = norm.Timestamp,
@@ -63,103 +61,15 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
                 Acceleration = norm.Acceleration,
                 AngularVelocity = norm.AngularVelocity,
                 AlertReason = norm.AlertReason,
-                Activity = string.Empty,
-                State = HorseState.Calm,
-                AlarmState = AlarmState.None
+                ReadingType = norm.ReadingType
             });
         }
         return Created();
     }
 
-
-    [HttpPost]
-    public async Task<IActionResult> Create(string horseId, SensorReading reading)
+    [HttpGet]
+    public async Task<ICollection<SensorReadingV2>> GetAll(string horseId)
     {
-        await horseService.EnsureExistsAsync(horseId);
-        reading.HorseId = horseId;
-        await _readings.InsertOneAsync(reading);
-
-        if (reading.AlarmState != AlarmState.None)
-        {
-            var config = await _configs.Find(c => c.HorseId == horseId).FirstOrDefaultAsync();
-            if (config?.NtfyEnabled == true)
-                await ntfy.NotifyAsync(horseId, reading.AlarmState, reading.AlertReason ?? reading.AlarmState.ToString());
-        }
-
-        return Created();
-    }
-
-
-    [HttpGet("posture-change")]
-    public async Task<IActionResult> PostureChange(string horseId)
-    {
-        await ntfy.NotifyAsync(horseId, AlarmState.Alert, $"[PostureChange]");
-        return Ok();
-    }
-
-    [HttpPost("batch")]
-    public async Task<IActionResult> CreateBatch(string horseId, [FromBody] List<SensorReading> readings)
-    {
-        await horseService.EnsureExistsAsync(horseId);
-        readings.ForEach(r => r.HorseId = horseId);
-        await _readings.InsertManyAsync(readings);
-
-        var config = await _configs.Find(c => c.HorseId == horseId).FirstOrDefaultAsync();
-        if (config?.NtfyEnabled == true)
-        {
-            var alert = readings.LastOrDefault(r => r.AlarmState != AlarmState.None);
-            if (alert is not null)
-                await ntfy.NotifyAsync(horseId, alert.AlarmState, alert.AlertReason ?? alert.AlarmState.ToString());
-        }
-
-        if (config?.LyingDownAlertEnabled == true)
-        {
-            var lyingDown = FirstConsecutive(readings, r =>
-                Math.Sqrt((double)(r.Pitch * r.Pitch + r.Roll * r.Roll)) > 70, 3);
-            if (lyingDown is not null)
-            {
-                var side = lyingDown.Roll > 0 ? "left side" : "right side";
-                await ntfy.NotifyAsync(horseId, AlarmState.Alert, $"[LyingDown] {side} (tilt {Math.Sqrt((double)(lyingDown.Pitch * lyingDown.Pitch + lyingDown.Roll * lyingDown.Roll)):F0}°)");
-            }
-        }
-
-        if (config?.HighRollAlertEnabled == true)
-        {
-            // Sensor roll calibration: standing = +5°, left 90° = +72°, right 90° = -65°
-            // Horse roll 45° left  → sensor roll ≈ +38.5°
-            // Horse roll 45° right → sensor roll ≈ -30°
-            var baseline = config.RollBaseline;
-            var highRoll = FirstConsecutive(readings, r =>
-                r.Roll > baseline + 33.5f || r.Roll < baseline - 35f, 3);
-            if (highRoll is not null)
-            {
-                var horseRoll = highRoll.Roll >= baseline
-                    ? (highRoll.Roll - baseline) / 67f * 90f
-                    : (highRoll.Roll - baseline) / 70f * 90f;
-                var side = horseRoll > 0 ? "left" : "right";
-                await ntfy.NotifyAsync(horseId, AlarmState.Alert, $"[HighRoll] {side} side (horse roll ~{Math.Abs(horseRoll):F0}°)");
-            }
-        }
-
-        return Created();
-    }
-
-    static SensorReading? FirstConsecutive(List<SensorReading> readings, Func<SensorReading, bool> predicate, int n)
-    {
-        int streak = 0;
-        SensorReading? first = null;
-        foreach (var r in readings)
-        {
-            if (predicate(r)) { if (streak++ == 0) first = r; if (streak >= n) return first; }
-            else { streak = 0; first = null; }
-        }
-        return null;
-    }
-
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> Delete(string horseId, string id)
-    {
-        var result = await _readings.DeleteOneAsync(r => r.HorseId == horseId && r.Id == id);
-        return result.DeletedCount == 0 ? NotFound() : NoContent();
+        return await _readings.Find(r => r.HorseId == horseId).ToListAsync();
     }
 }

@@ -52,6 +52,61 @@ Quaternion multiply(const Quaternion& a, const Quaternion& b) {
   };
 }
 
+// -------------------- SensorReadingV2 --------------------
+
+struct SensorReadingV2 {
+    String horseId;
+    unsigned long timestamp;
+
+    float qw = 1.0f;
+    float qx = 0.0f;
+    float qy = 0.0f;
+    float qz = 0.0f;
+
+    float acceleration = 0.0f;
+    float angularVelocity = 0.0f;
+
+    String alertReason;
+    String readingType;
+
+    void toJson(JsonObject obj) const {
+        obj["horseId"] = horseId;
+        obj["timestamp"] = timestamp;
+
+        obj["qw"] = qw;
+        obj["qx"] = qx;
+        obj["qy"] = qy;
+        obj["qz"] = qz;
+
+        obj["acceleration"] = acceleration;
+        obj["angularVelocity"] = angularVelocity;
+
+        if (alertReason.length() > 0)
+            obj["alertReason"] = alertReason;
+
+        obj["readingType"] = readingType;
+    }
+};
+
+struct SensorReadingV2Dto {
+    SensorReadingV2 rawReading;
+    SensorReadingV2 normalizedReading;
+
+    String toJson() const {
+        JsonDocument doc;
+
+        JsonObject raw = doc["rawReading"].to<JsonObject>();
+        rawReading.toJson(raw);
+
+        JsonObject normalized = doc["normalizedReading"].to<JsonObject>();
+        normalizedReading.toJson(normalized);
+
+        String output;
+        serializeJson(doc, output);
+        return output;
+    }
+};
+
 // -------------------- SENSOR READING --------------------
 
 class SensorReading {
@@ -106,6 +161,8 @@ RTC_DATA_ATTR unsigned long lastHeartbeatMs = 0;
 
 
 SensorReading currentReading;
+SensorReadingV2Dto currentSensorReadingV2Dto;
+
 
 enum Posture { STANDING,
                LYING };
@@ -133,6 +190,7 @@ bool get(const String& url);
 bool post(const String& url, const String& body);
 void IRAM_ATTR bnoISR();
 void sendHeartbeat();
+bool sendReading(const SensorReadingV2Dto& dto);
 
 
 // -------------------- SETUP --------------------
@@ -225,6 +283,15 @@ void loop() {
 
     if (event.sensorId == SH2_ROTATION_VECTOR) {
 
+      currentSensorReadingV2Dto.rawReading.readingType = "Raw";
+      currentSensorReadingV2Dto.rawReading.horseId = horseId;
+      currentSensorReadingV2Dto.rawReading.timestamp = millis();
+      currentSensorReadingV2Dto.rawReading.qx = event.un.rotationVector.i;
+      currentSensorReadingV2Dto.rawReading.qy = event.un.rotationVector.j;
+      currentSensorReadingV2Dto.rawReading.qz = event.un.rotationVector.k;
+      currentSensorReadingV2Dto.rawReading.qw = event.un.rotationVector.real;
+
+
       currentReading.qx = event.un.rotationVector.i;
       currentReading.qy = event.un.rotationVector.j;
       currentReading.qz = event.un.rotationVector.k;
@@ -235,8 +302,40 @@ void loop() {
         calibrate(currentReading);
         continue;
       }
+    }
+
+    else if (event.sensorId == SH2_LINEAR_ACCELERATION) {
+      currentSensorReadingV2Dto.rawReading.acceleration =
+        sqrt(
+          event.un.linearAcceleration.x * event.un.linearAcceleration.x + event.un.linearAcceleration.y * event.un.linearAcceleration.y + event.un.linearAcceleration.z * event.un.linearAcceleration.z);
+      currentReading.acceleration =
+        sqrt(
+          event.un.linearAcceleration.x * event.un.linearAcceleration.x + event.un.linearAcceleration.y * event.un.linearAcceleration.y + event.un.linearAcceleration.z * event.un.linearAcceleration.z);
+    }
+
+    else if (event.sensorId == SH2_GYROSCOPE_CALIBRATED) {
+
+      currentSensorReadingV2Dto.rawReading.angularVelocity =
+        sqrt(
+          event.un.gyroscope.x * event.un.gyroscope.x + event.un.gyroscope.y * event.un.gyroscope.y + event.un.gyroscope.z * event.un.gyroscope.z);
+      currentReading.angularVelocity =
+        sqrt(
+          event.un.gyroscope.x * event.un.gyroscope.x + event.un.gyroscope.y * event.un.gyroscope.y + event.un.gyroscope.z * event.un.gyroscope.z);
+    }
 
       SensorReading adjusted = getAdjustedReading(currentReading);
+
+      currentSensorReadingV2Dto.normalizedReading.readingType = "Normalized";
+      currentSensorReadingV2Dto.normalizedReading.horseId = horseId;
+      currentSensorReadingV2Dto.normalizedReading.timestamp = millis();
+      currentSensorReadingV2Dto.normalizedReading.qx = adjusted.qx;
+      currentSensorReadingV2Dto.normalizedReading.qy = adjusted.qy;
+      currentSensorReadingV2Dto.normalizedReading.qz = adjusted.qz;
+      currentSensorReadingV2Dto.normalizedReading.qw = adjusted.qw;
+      currentSensorReadingV2Dto.normalizedReading.acceleration = adjusted.acceleration;
+      currentSensorReadingV2Dto.normalizedReading.angularVelocity = adjusted.angularVelocity;
+
+      sendReading(currentSensorReadingV2Dto);
 
       float qw = adjusted.qw;
       float qx = adjusted.qx;
@@ -249,21 +348,7 @@ void loop() {
                  + qz * qz;
 
       posture = detectPosture(gz);
-    }
 
-    else if (event.sensorId == SH2_LINEAR_ACCELERATION) {
-
-      currentReading.acceleration =
-        sqrt(
-          event.un.linearAcceleration.x * event.un.linearAcceleration.x + event.un.linearAcceleration.y * event.un.linearAcceleration.y + event.un.linearAcceleration.z * event.un.linearAcceleration.z);
-    }
-
-    else if (event.sensorId == SH2_GYROSCOPE_CALIBRATED) {
-
-      currentReading.angularVelocity =
-        sqrt(
-          event.un.gyroscope.x * event.un.gyroscope.x + event.un.gyroscope.y * event.un.gyroscope.y + event.un.gyroscope.z * event.un.gyroscope.z);
-    }
   }
 }
 
@@ -317,6 +402,11 @@ Posture detectPosture(float gz) {
       break;
   }
   return posture;
+}
+
+bool sendReading(const SensorReadingV2Dto& dto) {
+  String url = String(SERVER_URL) + "/v2/horses/" + HORSE_ID + "/readings";
+  return post(url, dto.toJson());
 }
 
 // -------------------- WIFI --------------------
