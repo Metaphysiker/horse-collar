@@ -140,6 +140,8 @@ void sendHeartbeat();
 void setup() {
   Serial.begin(115200);
   delay(200);
+  Serial.print("Booting... ");
+
 
   Wire.begin();
 
@@ -169,7 +171,7 @@ void setup() {
     firstBoot = false;
     connectWifi();
     syncTime();
-    //fetchConfig();
+    fetchConfig();
     disconnectWifi();
   }
 
