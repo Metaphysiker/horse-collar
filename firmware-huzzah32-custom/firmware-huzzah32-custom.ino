@@ -1,12 +1,15 @@
 #include <Wire.h>
 #include <Adafruit_BNO08x.h>
 #include <esp_sleep.h>
+#include <esp_task_wdt.h>
+#include <esp_timer.h>
 #include <WiFi.h>
 #include <WiFiMulti.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include "config.h"
+#include <esp_system.h>
 
 // -------------------- CONFIG --------------------
 
@@ -14,21 +17,23 @@
 #define WIFI_TIMEOUT_MS       15000
 #define HTTP_TIMEOUT_MS       5000
 #define NTP_TIMEOUT_MS        10000
-#define HEARTBEAT_INTERVAL_MS 60000
+#define HEARTBEAT_INTERVAL_US  (60ULL * 1000000ULL)   // 60 s in microseconds
+#define PROCESS_INTERVAL_US    (1000ULL * 1000ULL)     //  1 s in microseconds
+#define WDT_TIMEOUT_S         30
+#define MAX_SEND_FAILURES     5
 
 // Hysteresis band:
-//   Standing → Lying  when gz drops below LYING_ENTER  (tilt > 45°)
-//   Lying → Standing  when gz rises above LYING_EXIT   (tilt < 30°)
+//   Standing → Lying  when gz drops below LYING_ENTER_COS  (tilt > 75°)
+//   Lying → Standing  when gz rises above LYING_EXIT_COS   (tilt < 60°)
 // gz ≈ 1.0 when collar is upright, ≈ 0.0 when on its side.
-const float LYING_ENTER_DEG  = 75.0f;   // cross this going down  → lying
-const float LYING_EXIT_DEG   = 60.0f;   // cross this going up    → standing
-const float LYING_ENTER_COS  = cos(LYING_ENTER_DEG * PI / 180.0f);  // ≈ 0.707
-const float LYING_EXIT_COS   = cos(LYING_EXIT_DEG  * PI / 180.0f);  // ≈ 0.866
+const float LYING_ENTER_DEG = 75.0f;
+const float LYING_EXIT_DEG  = 60.0f;
+const float LYING_ENTER_COS = cos(LYING_ENTER_DEG * PI / 180.0f);
+const float LYING_EXIT_COS  = cos(LYING_EXIT_DEG  * PI / 180.0f);
 
-const uint32_t ROTATION_INTERVAL     = 10000;   //  10 ms — BNO085 minimum
-const uint32_t ACCEL_INTERVAL        = 100000;  // 100 ms
-const uint32_t GYRO_INTERVAL         = 100000;  // 100 ms
-const unsigned long PROCESS_INTERVAL_MS = 1000; //   1 s between processing cycles
+const uint32_t ROTATION_INTERVAL = 10000;   //  10 ms
+const uint32_t ACCEL_INTERVAL    = 100000;  // 100 ms
+const uint32_t GYRO_INTERVAL     = 100000;  // 100 ms
 
 // -------------------- STRUCTS --------------------
 
@@ -90,21 +95,20 @@ sh2_SensorValue_t event;
 
 volatile bool newDataReady = false;
 
-RTC_DATA_ATTR bool          isCalibrated          = false;
-RTC_DATA_ATTR float         refQx                 = 0.0f;
-RTC_DATA_ATTR float         refQy                 = 0.0f;
-RTC_DATA_ATTR float         refQz                 = 0.0f;
-RTC_DATA_ATTR float         refQw                 = 1.0f;
-RTC_DATA_ATTR unsigned long lastHeartbeatMs       = 0;
-RTC_DATA_ATTR unsigned long lastProcessedMs       = 0;
-RTC_DATA_ATTR int           sendEveryN            = 60;
-RTC_DATA_ATTR int           readingsSinceLastSend = 0;
-RTC_DATA_ATTR bool          firstBoot             = true;
-RTC_DATA_ATTR bool          timeSynced            = false;
-RTC_DATA_ATTR bool          everHadAccel          = false;
-RTC_DATA_ATTR bool          everHadGyro           = false;
+RTC_DATA_ATTR bool     isCalibrated          = false;
+RTC_DATA_ATTR float    refQx                 = 0.0f;
+RTC_DATA_ATTR float    refQy                 = 0.0f;
+RTC_DATA_ATTR float    refQz                 = 0.0f;
+RTC_DATA_ATTR float    refQw                 = 1.0f;
+RTC_DATA_ATTR uint64_t lastHeartbeatUs       = 0;
+RTC_DATA_ATTR uint64_t lastProcessedUs       = 0;
+RTC_DATA_ATTR int      sendEveryN            = 60;
+RTC_DATA_ATTR int      readingsSinceLastSend = 0;
+RTC_DATA_ATTR bool     firstBoot             = true;
+RTC_DATA_ATTR bool     timeSynced            = false;
+RTC_DATA_ATTR bool     everHadAccel          = false;
+RTC_DATA_ATTR bool     everHadGyro           = false;
 
-// currentDto is NOT RTC_DATA_ATTR — resets on hard reboot, which is fine.
 SensorReadingV2Dto currentDto;
 
 enum Posture { STANDING, LYING };
@@ -114,6 +118,8 @@ bool    postureChanged = false;
 static float calAccum[4] = { 0, 0, 0, 0 };
 static int   calCount    = 0;
 const  int   CAL_SAMPLES = 10;
+
+static int consecutiveSendFailures = 0;
 
 // -------------------- FORWARD DECLARATIONS --------------------
 
@@ -136,11 +142,22 @@ void   IRAM_ATTR bnoISR();
 void   sendHeartbeat();
 bool   sendReading(const SensorReadingV2Dto& dto);
 String isoTimestamp();
+void printResetReason();
 
 // -------------------- SETUP --------------------
 
 void setup() {
+  // Watchdog first — catches hangs anywhere in setup
+    esp_task_wdt_config_t wdtConfig = {
+    .timeout_ms = WDT_TIMEOUT_S * 1000,
+    .idle_core_mask = 0,
+    .trigger_panic = true
+  };
+  esp_task_wdt_reconfigure(&wdtConfig);
+  esp_task_wdt_add(NULL);
+
   Serial.begin(115200);
+  printResetReason();
   delay(500);
   Serial.println("Setup");
 
@@ -148,7 +165,7 @@ void setup() {
 
   if (!bno08x.begin_I2C()) {
     Serial.println("BNO085 not found — halting");
-    while (1) delay(10);
+    while (1) delay(10);   // WDT will reboot after 30 s
   }
 
   delay(1000);
@@ -186,6 +203,8 @@ void IRAM_ATTR bnoISR() {
 // -------------------- LOOP --------------------
 
 void loop() {
+  esp_task_wdt_reset();
+
   bool hasData;
   noInterrupts();
   hasData      = newDataReady;
@@ -197,20 +216,19 @@ void loop() {
     return;
   }
 
-  unsigned long now = millis();
+  // esp_timer_get_time() runs during light sleep, millis() does not
+  uint64_t now = esp_timer_get_time();
 
   // Not time to process yet — drain buffer so INT pin resets, then sleep
-  if (now - lastProcessedMs < PROCESS_INTERVAL_MS) {
+  if (now - lastProcessedUs < PROCESS_INTERVAL_US) {
     while (bno08x.getSensorEvent(&event)) {}
     esp_light_sleep_start();
     return;
   }
 
-  lastProcessedMs = now;
+  lastProcessedUs = now;
   Serial.println("Processing...");
 
-  // Rotation must arrive every cycle; accel and gyro only need to have
-  // arrived at least once since boot.
   bool hasRotation = false;
 
   while (bno08x.getSensorEvent(&event)) {
@@ -258,9 +276,6 @@ void loop() {
   currentDto.normalizedReading.readingType = "Normalized";
   currentDto.normalizedReading.horseId     = HORSE_ID;
 
-  // gz is the Z component of the normalized gravity vector.
-  // ≈ +1.0  collar upright (horse standing)
-  // ≈  0.0  collar on its side (horse lying)
   float nqw = currentDto.normalizedReading.qw;
   float nqx = currentDto.normalizedReading.qx;
   float nqy = currentDto.normalizedReading.qy;
@@ -272,7 +287,7 @@ void loop() {
 
   posture = detectPosture(gz);
 
-  bool needsHeartbeat = (now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS);
+  bool needsHeartbeat = (now - lastHeartbeatUs >= HEARTBEAT_INTERVAL_US);
 
   readingsSinceLastSend++;
   if (readingsSinceLastSend >= sendEveryN || postureChanged || needsHeartbeat) {
@@ -280,10 +295,26 @@ void loop() {
     String ts = isoTimestamp();
     currentDto.rawReading.timestamp        = ts;
     currentDto.normalizedReading.timestamp = ts;
+
     connectWifi();
-    sendReading(currentDto);
+
+    bool ok = sendReading(currentDto);
+    if (ok) {
+      consecutiveSendFailures = 0;
+    } else {
+      consecutiveSendFailures++;
+      Serial.printf("Send failed — consecutive failures: %d\n",
+                    consecutiveSendFailures);
+      if (consecutiveSendFailures >= MAX_SEND_FAILURES) {
+        Serial.println("Too many failures — rebooting");
+        delay(200);
+        ESP.restart();
+      }
+    }
+
     if (postureChanged) { sendPostureChange(); postureChanged = false; }
-    if (needsHeartbeat) { lastHeartbeatMs = now; sendHeartbeat(); }
+    if (needsHeartbeat) { lastHeartbeatUs = now; sendHeartbeat(); }
+
     disconnectWifi();
   }
 }
@@ -352,14 +383,6 @@ SensorReadingV2 normalize(const SensorReadingV2& raw) {
 }
 
 // -------------------- POSTURE DETECTION --------------------
-//
-// Hysteresis prevents rapid flickering near the threshold:
-//
-//   STANDING → LYING   when gz < LYING_ENTER_COS  (tilt increases past 45°)
-//   LYING → STANDING   when gz > LYING_EXIT_COS   (tilt decreases below 30°)
-//
-//   gz ≈ 1.0  upright
-//   gz ≈ 0.0  on side
 
 Posture detectPosture(float gz) {
   switch (posture) {
@@ -375,7 +398,6 @@ Posture detectPosture(float gz) {
     case LYING:
       if (gz > LYING_EXIT_COS) {
         Serial.println("→ STANDING");
-        //postureChanged = true;
         return STANDING;
       }
       Serial.println("  LYING");
@@ -416,6 +438,7 @@ bool ensureWifi() {
 
   unsigned long start = millis();
   while (millis() - start < WIFI_TIMEOUT_MS) {
+    esp_task_wdt_reset();   // keep watchdog happy during connect wait
     if (wifiMulti.run() == WL_CONNECTED) return true;
     delay(500);
   }
@@ -436,6 +459,7 @@ void syncTime() {
   unsigned long start = millis();
   time_t now = 0;
   while (millis() - start < NTP_TIMEOUT_MS) {
+    esp_task_wdt_reset();
     time(&now);
     if (now > 100000) { timeSynced = true; return; }
     delay(500);
@@ -464,7 +488,6 @@ void fetchConfig() {
     refQz      = doc["refQz"]     | refQz;
     refQw      = doc["refQw"]     | refQw;
 
-    // Remote recalibration
     if (doc["recalibrate"] | false) {
       isCalibrated = false;
       calCount     = 0;
@@ -472,17 +495,12 @@ void fetchConfig() {
       Serial.println("Remote recalibration triggered");
     }
 
-    // Remote reboot
     if (doc["reboot"] | false) {
       post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/reboot/clear", "{}");
       Serial.println("Remote reboot triggered");
       delay(500);
       ESP.restart();
     }
-
-    // Optionally pull thresholds from server in future:
-    // lyingEnterDeg = doc["lyingEnterDeg"] | lyingEnterDeg;
-    // lyingExitDeg  = doc["lyingExitDeg"]  | lyingExitDeg;
   }
   http.end();
 }
@@ -566,4 +584,22 @@ String isoTimestamp() {
   char buf[30];
   strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &t);
   return String(buf);
+}
+
+void printResetReason() {
+  esp_reset_reason_t reason = esp_reset_reason();
+  Serial.print("Reset reason: ");
+  switch (reason) {
+    case ESP_RST_POWERON:   Serial.println("Power on");            break;
+    case ESP_RST_EXT:       Serial.println("External pin reset");  break;
+    case ESP_RST_SW:        Serial.println("Software restart");    break;
+    case ESP_RST_PANIC:     Serial.println("Panic / exception");   break;
+    case ESP_RST_INT_WDT:   Serial.println("Interrupt watchdog");  break;
+    case ESP_RST_TASK_WDT:  Serial.println("Task watchdog");       break;
+    case ESP_RST_WDT:       Serial.println("Other watchdog");      break;
+    case ESP_RST_DEEPSLEEP: Serial.println("Deep sleep wakeup");   break;
+    case ESP_RST_BROWNOUT:  Serial.println("Brownout (low power)"); break;
+    case ESP_RST_SDIO:      Serial.println("SDIO reset");          break;
+    default:                Serial.println("Unknown");             break;
+  }
 }
