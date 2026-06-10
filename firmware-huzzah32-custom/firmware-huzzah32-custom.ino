@@ -16,15 +16,19 @@
 #define NTP_TIMEOUT_MS        10000
 #define HEARTBEAT_INTERVAL_MS 60000
 
-const float LYING_THRESHOLD    = 75.0f;
-const float STANDING_THRESHOLD = 45.0f;
-const float LYING_COS          = cos(LYING_THRESHOLD    * PI / 180.0f);
-const float STANDING_COS       = cos(STANDING_THRESHOLD * PI / 180.0f);
+// Hysteresis band:
+//   Standing → Lying  when gz drops below LYING_ENTER  (tilt > 45°)
+//   Lying → Standing  when gz rises above LYING_EXIT   (tilt < 30°)
+// gz ≈ 1.0 when collar is upright, ≈ 0.0 when on its side.
+const float LYING_ENTER_DEG  = 75.0f;   // cross this going down  → lying
+const float LYING_EXIT_DEG   = 60.0f;   // cross this going up    → standing
+const float LYING_ENTER_COS  = cos(LYING_ENTER_DEG * PI / 180.0f);  // ≈ 0.707
+const float LYING_EXIT_COS   = cos(LYING_EXIT_DEG  * PI / 180.0f);  // ≈ 0.866
 
-const uint32_t ROTATION_INTERVAL    = 10000;   // 10ms — required by this sensor
-const uint32_t ACCEL_INTERVAL       = 100000;  // 100ms
-const uint32_t GYRO_INTERVAL        = 100000;  // 100ms
-const unsigned long PROCESS_INTERVAL_MS = 1000;
+const uint32_t ROTATION_INTERVAL     = 10000;   //  10 ms — BNO085 minimum
+const uint32_t ACCEL_INTERVAL        = 100000;  // 100 ms
+const uint32_t GYRO_INTERVAL         = 100000;  // 100 ms
+const unsigned long PROCESS_INTERVAL_MS = 1000; //   1 s between processing cycles
 
 // -------------------- STRUCTS --------------------
 
@@ -86,23 +90,21 @@ sh2_SensorValue_t event;
 
 volatile bool newDataReady = false;
 
-RTC_DATA_ATTR bool          isCalibrated         = false;
-RTC_DATA_ATTR float         refQx                = 0.0f;
-RTC_DATA_ATTR float         refQy                = 0.0f;
-RTC_DATA_ATTR float         refQz                = 0.0f;
-RTC_DATA_ATTR float         refQw                = 1.0f;
-RTC_DATA_ATTR unsigned long lastHeartbeatMs      = 0;
-RTC_DATA_ATTR unsigned long lastProcessedMs      = 0;
-RTC_DATA_ATTR int           sendEveryN           = 60;
+RTC_DATA_ATTR bool          isCalibrated          = false;
+RTC_DATA_ATTR float         refQx                 = 0.0f;
+RTC_DATA_ATTR float         refQy                 = 0.0f;
+RTC_DATA_ATTR float         refQz                 = 0.0f;
+RTC_DATA_ATTR float         refQw                 = 1.0f;
+RTC_DATA_ATTR unsigned long lastHeartbeatMs       = 0;
+RTC_DATA_ATTR unsigned long lastProcessedMs       = 0;
+RTC_DATA_ATTR int           sendEveryN            = 60;
 RTC_DATA_ATTR int           readingsSinceLastSend = 0;
-RTC_DATA_ATTR bool          firstBoot            = true;
-RTC_DATA_ATTR bool          timeSynced           = false;
-RTC_DATA_ATTR bool          everHadAccel         = false;
-RTC_DATA_ATTR bool          everHadGyro          = false;
+RTC_DATA_ATTR bool          firstBoot             = true;
+RTC_DATA_ATTR bool          timeSynced            = false;
+RTC_DATA_ATTR bool          everHadAccel          = false;
+RTC_DATA_ATTR bool          everHadGyro           = false;
 
-// currentDto is NOT RTC_DATA_ATTR — it's a normal global.
-// It persists between loop() calls (same power-on session)
-// but resets on hard reboot, which is fine.
+// currentDto is NOT RTC_DATA_ATTR — resets on hard reboot, which is fine.
 SensorReadingV2Dto currentDto;
 
 enum Posture { STANDING, LYING };
@@ -139,13 +141,13 @@ String isoTimestamp();
 
 void setup() {
   Serial.begin(115200);
-  delay(500);  // longer delay — give everything time to settle
+  delay(500);
   Serial.println("Setup");
 
   Wire.begin();
 
   if (!bno08x.begin_I2C()) {
-    Serial.println("BNO085 not found");
+    Serial.println("BNO085 not found — halting");
     while (1) delay(10);
   }
 
@@ -154,7 +156,7 @@ void setup() {
   bool ok1 = bno08x.enableReport(SH2_ROTATION_VECTOR,      ROTATION_INTERVAL);
   bool ok2 = bno08x.enableReport(SH2_LINEAR_ACCELERATION,  ACCEL_INTERVAL);
   bool ok3 = bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, GYRO_INTERVAL);
-  Serial.printf("RV=%d ACC=%d GYRO=%d\n", ok1, ok2, ok3);
+  Serial.printf("Reports enabled — RV=%d ACC=%d GYRO=%d\n", ok1, ok2, ok3);
 
   pinMode(BNO_INT_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(BNO_INT_PIN), bnoISR, FALLING);
@@ -195,18 +197,20 @@ void loop() {
     return;
   }
 
-  // Not time to process yet — drain buffer so INT pin resets, then sleep
   unsigned long now = millis();
+
+  // Not time to process yet — drain buffer so INT pin resets, then sleep
   if (now - lastProcessedMs < PROCESS_INTERVAL_MS) {
     while (bno08x.getSensorEvent(&event)) {}
     esp_light_sleep_start();
     return;
   }
-  Serial.println("Processing new data...");
-  lastProcessedMs = now;
 
-  // Per-cycle flag: rotation must arrive this cycle
-  // Accel and gyro only need to have arrived at least once ever
+  lastProcessedMs = now;
+  Serial.println("Processing...");
+
+  // Rotation must arrive every cycle; accel and gyro only need to have
+  // arrived at least once since boot.
   bool hasRotation = false;
 
   while (bno08x.getSensorEvent(&event)) {
@@ -218,7 +222,7 @@ void loop() {
       currentDto.rawReading.qw = event.un.rotationVector.real;
 
       if (!isCalibrated) {
-        Serial.printf("Cal sample %d\n", calCount + 1);
+        Serial.printf("Cal sample %d / %d\n", calCount + 1, CAL_SAMPLES);
         calibrateAccumulate(currentDto.rawReading.qx,
                             currentDto.rawReading.qy,
                             currentDto.rawReading.qz,
@@ -254,20 +258,28 @@ void loop() {
   currentDto.normalizedReading.readingType = "Normalized";
   currentDto.normalizedReading.horseId     = HORSE_ID;
 
+  // gz is the Z component of the normalized gravity vector.
+  // ≈ +1.0  collar upright (horse standing)
+  // ≈  0.0  collar on its side (horse lying)
   float nqw = currentDto.normalizedReading.qw;
   float nqx = currentDto.normalizedReading.qx;
   float nqy = currentDto.normalizedReading.qy;
   float nqz = currentDto.normalizedReading.qz;
   float gz  = nqw*nqw - nqx*nqx - nqy*nqy + nqz*nqz;
-  posture   = detectPosture(gz);
+
+  Serial.printf("gz=%.3f  posture=%s\n", gz,
+                posture == LYING ? "LYING" : "STANDING");
+
+  posture = detectPosture(gz);
 
   bool needsHeartbeat = (now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS);
 
   readingsSinceLastSend++;
   if (readingsSinceLastSend >= sendEveryN || postureChanged || needsHeartbeat) {
     readingsSinceLastSend = 0;
-    currentDto.rawReading.timestamp        = isoTimestamp();
-    currentDto.normalizedReading.timestamp = isoTimestamp();
+    String ts = isoTimestamp();
+    currentDto.rawReading.timestamp        = ts;
+    currentDto.normalizedReading.timestamp = ts;
     connectWifi();
     sendReading(currentDto);
     if (postureChanged) { sendPostureChange(); postureChanged = false; }
@@ -320,7 +332,8 @@ void calibrateAccumulate(float qx, float qy, float qz, float qw) {
   refQw /= len;
 
   isCalibrated = true;
-  Serial.printf("Calibrated ref=(%.3f, %.3f, %.3f, %.3f)\n", refQx, refQy, refQz, refQw);
+  Serial.printf("Calibrated. ref=(%.3f, %.3f, %.3f, %.3f)\n",
+                refQx, refQy, refQz, refQw);
 }
 
 // -------------------- NORMALIZATION --------------------
@@ -339,14 +352,33 @@ SensorReadingV2 normalize(const SensorReadingV2& raw) {
 }
 
 // -------------------- POSTURE DETECTION --------------------
+//
+// Hysteresis prevents rapid flickering near the threshold:
+//
+//   STANDING → LYING   when gz < LYING_ENTER_COS  (tilt increases past 45°)
+//   LYING → STANDING   when gz > LYING_EXIT_COS   (tilt decreases below 30°)
+//
+//   gz ≈ 1.0  upright
+//   gz ≈ 0.0  on side
 
 Posture detectPosture(float gz) {
   switch (posture) {
     case STANDING:
-      if (gz < LYING_COS)    { postureChanged = true; return LYING;    }
+      if (gz < LYING_ENTER_COS) {
+        Serial.println("→ LYING");
+        postureChanged = true;
+        return LYING;
+      }
+      Serial.println("  STANDING");
       break;
+
     case LYING:
-      if (gz > STANDING_COS) { postureChanged = true; return STANDING; }
+      if (gz > LYING_EXIT_COS) {
+        Serial.println("→ STANDING");
+        //postureChanged = true;
+        return STANDING;
+      }
+      Serial.println("  LYING");
       break;
   }
   return posture;
@@ -355,7 +387,7 @@ Posture detectPosture(float gz) {
 // -------------------- READING --------------------
 
 bool sendReading(const SensorReadingV2Dto& dto) {
-  Serial.println("Send reading");
+  Serial.println("Sending reading...");
   String url = String(SERVER_URL) + "/v2/horses/" + HORSE_ID + "/readings/from-dto";
   return post(url, dto.toJson());
 }
@@ -363,8 +395,10 @@ bool sendReading(const SensorReadingV2Dto& dto) {
 // -------------------- POSTURE CHANGE --------------------
 
 void sendPostureChange() {
-  String body = "{\"posture\":\"" + String(posture == LYING ? "lying" : "standing") + "\"}";
-  post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/readings/posture-change", body);
+  String body = "{\"posture\":\"" +
+                String(posture == LYING ? "lying" : "standing") +
+                "\"}";
+  get(String(SERVER_URL) + "/horses/" + HORSE_ID + "/readings/posture-change");
 }
 
 // -------------------- WIFI --------------------
@@ -385,6 +419,7 @@ bool ensureWifi() {
     if (wifiMulti.run() == WL_CONNECTED) return true;
     delay(500);
   }
+  Serial.println("WiFi timeout");
   return false;
 }
 
@@ -429,6 +464,7 @@ void fetchConfig() {
     refQz      = doc["refQz"]     | refQz;
     refQw      = doc["refQw"]     | refQw;
 
+    // Remote recalibration
     if (doc["recalibrate"] | false) {
       isCalibrated = false;
       calCount     = 0;
@@ -436,12 +472,17 @@ void fetchConfig() {
       Serial.println("Remote recalibration triggered");
     }
 
+    // Remote reboot
     if (doc["reboot"] | false) {
       post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/reboot/clear", "{}");
       Serial.println("Remote reboot triggered");
       delay(500);
       ESP.restart();
     }
+
+    // Optionally pull thresholds from server in future:
+    // lyingEnterDeg = doc["lyingEnterDeg"] | lyingEnterDeg;
+    // lyingExitDeg  = doc["lyingExitDeg"]  | lyingExitDeg;
   }
   http.end();
 }
@@ -462,8 +503,7 @@ bool get(const String& url) {
   http.setTimeout(HTTP_TIMEOUT_MS);
 
   int code = http.GET();
-  Serial.println(code);
-  Serial.println(url);
+  Serial.printf("GET %s → %d\n", url.c_str(), code);
 
   if (code < 0) {
     Serial.println("GET failed: " + http.errorToString(code));
@@ -480,7 +520,7 @@ bool get(const String& url) {
 }
 
 bool post(const String& url, const String& body) {
-  Serial.println("POST " + url + " body=" + body);
+  Serial.printf("POST %s\n", url.c_str());
   if (!ensureWifi()) return false;
 
   HTTPClient http;
@@ -495,6 +535,7 @@ bool post(const String& url, const String& body) {
   http.addHeader("Content-Type", "application/json");
 
   int code = http.POST(body);
+  Serial.printf("POST → %d\n", code);
   if (code < 0) {
     Serial.println("POST failed: " + http.errorToString(code));
     http.end();
@@ -502,7 +543,6 @@ bool post(const String& url, const String& body) {
   }
   if (code < 200 || code >= 300) {
     Serial.println("POST non-2xx: " + http.getString());
-    Serial.println("POST failed: " + http.errorToString(code));
     http.end();
     return false;
   }
@@ -510,9 +550,13 @@ bool post(const String& url, const String& body) {
   return true;
 }
 
+// -------------------- HEARTBEAT --------------------
+
 void sendHeartbeat() {
   get(String(SERVER_URL) + "/horses/" + HORSE_ID + "/heartbeat");
 }
+
+// -------------------- TIMESTAMP --------------------
 
 String isoTimestamp() {
   time_t now;
