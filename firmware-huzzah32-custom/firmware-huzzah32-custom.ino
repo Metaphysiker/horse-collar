@@ -31,6 +31,11 @@ const float LYING_EXIT_DEG  = 60.0f;
 const float LYING_ENTER_COS = cos(LYING_ENTER_DEG * PI / 180.0f);
 const float LYING_EXIT_COS  = cos(LYING_EXIT_DEG  * PI / 180.0f);
 
+const float ROLL_ENTER_DEG = 75.0f;
+const float ROLL_EXIT_DEG  = 60.0f;
+const float ROLL_ENTER_COS = cos(ROLL_ENTER_DEG * PI / 180.0f);  // ≈ 0.259
+const float ROLL_EXIT_COS  = cos(ROLL_EXIT_DEG  * PI / 180.0f);  // ≈ 0.500
+
 const uint32_t ROTATION_INTERVAL = 10000;   //  10 ms
 const uint32_t ACCEL_INTERVAL    = 100000;  // 100 ms
 const uint32_t GYRO_INTERVAL     = 100000;  // 100 ms
@@ -126,6 +131,7 @@ static int consecutiveSendFailures = 0;
 void            calibrateAccumulate(float qx, float qy, float qz, float qw);
 SensorReadingV2 normalize(const SensorReadingV2& raw);
 Posture         detectPosture(float gz);
+Posture         detectPostureV2(float nqw, float nqx, float nqy, float nqz);
 float           magnitude(float x, float y, float z);
 Quat            conjugate(const Quat& q);
 Quat            multiply(const Quat& a, const Quat& b);
@@ -285,7 +291,8 @@ void loop() {
   Serial.printf("gz=%.3f  posture=%s\n", gz,
                 posture == LYING ? "LYING" : "STANDING");
 
-  posture = detectPosture(gz);
+  //posture = detectPosture(gz);
+  posture = detectPostureV2(nqw, nqx, nqy, nqz);
 
   bool needsHeartbeat = (now - lastHeartbeatUs >= HEARTBEAT_INTERVAL_US);
 
@@ -602,4 +609,51 @@ void printResetReason() {
     case ESP_RST_SDIO:      Serial.println("SDIO reset");          break;
     default:                Serial.println("Unknown");             break;
   }
+}
+
+Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
+
+  // Gravity vector from rotation matrix (3rd column = "world up" in device frame)
+  //   gx = roll  component: side-to-side tilt — horse lying down
+  //   gy = pitch component: fore-aft tilt    — horse bending neck (ignored)
+  //   gz = yaw   component: upright-ness     — was your old criterion
+  float gx = 2.0f * (nqx * nqz - nqy * nqw);   // roll
+  float gy = 2.0f * (nqy * nqz + nqx * nqw);   // pitch
+  float gz = nqw*nqw - nqx*nqx - nqy*nqy + nqz*nqz;
+
+  float rollTilt = fabsf(gx);
+
+  // Convert to an intuitive angle
+  float rollDeg = asinf(constrain(rollTilt, 0.0f, 1.0f)) * 180.0f / PI;
+  float pitchDeg = asinf(constrain(fabsf(gy), 0.0f, 1.0f)) * 180.0f / PI;
+
+  Serial.printf(
+    "ROLL=%5.1f°  PITCH=%5.1f°  gx=%+.3f gy=%+.3f gz=%+.3f\n",
+    rollDeg,
+    pitchDeg,
+    gx,
+    gy,
+    gz
+  );
+
+  switch (posture) {
+    case STANDING:
+      // Enter LYING only on roll, not pitch:
+      //   rollTilt exceeds sin(75°) ≈ 0.966  (complement of ROLL_ENTER_COS)
+      if (rollTilt > sinf(ROLL_ENTER_DEG * PI / 180.0f)) {
+        Serial.println("→ LYING (roll)");
+        postureChanged = true;
+        return LYING;
+      }
+      break;
+
+    case LYING:
+      if (rollTilt < sinf(ROLL_EXIT_DEG * PI / 180.0f)) {
+        Serial.println("→ STANDING");
+        //postureChanged = true;
+        return STANDING;
+      }
+      break;
+  }
+  return posture;
 }
