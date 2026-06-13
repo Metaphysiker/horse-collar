@@ -13,32 +13,32 @@
 
 // -------------------- CONFIG --------------------
 
-#define BNO_INT_PIN           14
-#define WIFI_TIMEOUT_MS       15000
-#define HTTP_TIMEOUT_MS       5000
-#define NTP_TIMEOUT_MS        10000
+#define BNO_INT_PIN            14
+#define WIFI_TIMEOUT_MS        15000
+#define HTTP_TIMEOUT_MS        5000
+#define NTP_TIMEOUT_MS         10000
 #define HEARTBEAT_INTERVAL_US  (60ULL * 1000000ULL)   // 60 s in microseconds
-#define PROCESS_INTERVAL_US    (1000ULL * 1000ULL)     //  1 s in microseconds
-#define WDT_TIMEOUT_S         30
-#define MAX_SEND_FAILURES     5
+#define PROCESS_INTERVAL_US    1000000 //(1000ULL * 1000ULL)     //  1 s in microseconds
+#define WDT_TIMEOUT_S          30
+#define MAX_SEND_FAILURES      5
+#define SENSOR_DRAIN_TIMEOUT_MS  200   // max ms to spend draining BNO buffer
+#define SENSOR_READ_TIMEOUT_MS   500   // max ms to spend in main read loop
 
-// Hysteresis band:
-//   Standing → Lying  when gz drops below LYING_ENTER_COS  (tilt > 75°)
-//   Lying → Standing  when gz rises above LYING_EXIT_COS   (tilt < 60°)
-// gz ≈ 1.0 when collar is upright, ≈ 0.0 when on its side.
+// Hysteresis band (legacy gz-based, kept for reference):
 const float LYING_ENTER_DEG = 75.0f;
 const float LYING_EXIT_DEG  = 60.0f;
 const float LYING_ENTER_COS = cos(LYING_ENTER_DEG * PI / 180.0f);
 const float LYING_EXIT_COS  = cos(LYING_EXIT_DEG  * PI / 180.0f);
 
+// Roll-based hysteresis (active):
+//   Standing -> Lying  when |roll| > sin(75 deg) ~= 0.966
+//   Lying -> Standing  when |roll| < sin(60 deg) ~= 0.866
 const float ROLL_ENTER_DEG = 75.0f;
 const float ROLL_EXIT_DEG  = 60.0f;
-const float ROLL_ENTER_COS = cos(ROLL_ENTER_DEG * PI / 180.0f);  // ≈ 0.259
-const float ROLL_EXIT_COS  = cos(ROLL_EXIT_DEG  * PI / 180.0f);  // ≈ 0.500
 
-const uint32_t ROTATION_INTERVAL = 10000;   //  10 ms
-const uint32_t ACCEL_INTERVAL    = 100000;  // 100 ms
-const uint32_t GYRO_INTERVAL     = 100000;  // 100 ms
+const uint32_t ROTATION_INTERVAL = 250000;   //  10 ms
+const uint32_t ACCEL_INTERVAL    = 250000;  // 100 ms
+const uint32_t GYRO_INTERVAL     = 250000;  // 100 ms
 
 // -------------------- STRUCTS --------------------
 
@@ -148,19 +148,22 @@ void   IRAM_ATTR bnoISR();
 void   sendHeartbeat();
 bool   sendReading(const SensorReadingV2Dto& dto);
 String isoTimestamp();
-void printResetReason();
+void   printResetReason();
 
 // -------------------- SETUP --------------------
 
 void setup() {
-  // Watchdog first — catches hangs anywhere in setup
-    esp_task_wdt_config_t wdtConfig = {
-    .timeout_ms = WDT_TIMEOUT_S * 1000,
+  // Enroll loopTask in WDT unconditionally.
+  // The loop resets the WDT before every light sleep, so intentional idle
+  // never trips it. Only genuine hangs (stuck I2C, frozen WiFi) will fire it.
+  esp_task_wdt_config_t wdtConfig = {
+    .timeout_ms     = WDT_TIMEOUT_S * 1000,
     .idle_core_mask = 0,
-    .trigger_panic = true
+    .trigger_panic  = true
   };
   esp_task_wdt_reconfigure(&wdtConfig);
   esp_task_wdt_add(NULL);
+  esp_task_wdt_reset();
 
   Serial.begin(115200);
   printResetReason();
@@ -170,7 +173,7 @@ void setup() {
   Wire.begin();
 
   if (!bno08x.begin_I2C()) {
-    Serial.println("BNO085 not found — halting");
+    Serial.println("BNO085 not found -- halting");
     while (1) delay(10);   // WDT will reboot after 30 s
   }
 
@@ -179,7 +182,7 @@ void setup() {
   bool ok1 = bno08x.enableReport(SH2_ROTATION_VECTOR,      ROTATION_INTERVAL);
   bool ok2 = bno08x.enableReport(SH2_LINEAR_ACCELERATION,  ACCEL_INTERVAL);
   bool ok3 = bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, GYRO_INTERVAL);
-  Serial.printf("Reports enabled — RV=%d ACC=%d GYRO=%d\n", ok1, ok2, ok3);
+  Serial.printf("Reports enabled -- RV=%d ACC=%d GYRO=%d\n", ok1, ok2, ok3);
 
   pinMode(BNO_INT_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(BNO_INT_PIN), bnoISR, FALLING);
@@ -209,6 +212,7 @@ void IRAM_ATTR bnoISR() {
 // -------------------- LOOP --------------------
 
 void loop() {
+  // Reset WDT at the top of every wake — proves we're alive.
   esp_task_wdt_reset();
 
   bool hasData;
@@ -218,16 +222,24 @@ void loop() {
   interrupts();
 
   if (!hasData) {
+    esp_task_wdt_reset();        // reset before sleeping so timer starts fresh
     esp_light_sleep_start();
     return;
   }
 
-  // esp_timer_get_time() runs during light sleep, millis() does not
+  // esp_timer_get_time() keeps running during light sleep; millis() does not.
   uint64_t now = esp_timer_get_time();
 
-  // Not time to process yet — drain buffer so INT pin resets, then sleep
+  // Not time to process yet -- drain buffer so INT pin de-asserts, then sleep.
   if (now - lastProcessedUs < PROCESS_INTERVAL_US) {
-    while (bno08x.getSensorEvent(&event)) {}
+    unsigned long drainStart = millis();
+    while (bno08x.getSensorEvent(&event)) {
+      if (millis() - drainStart > SENSOR_DRAIN_TIMEOUT_MS) {
+        Serial.println("Drain timeout -- I2C stuck?");
+        break;
+      }
+    }
+    esp_task_wdt_reset();        // reset before sleeping
     esp_light_sleep_start();
     return;
   }
@@ -236,8 +248,13 @@ void loop() {
   Serial.println("Processing...");
 
   bool hasRotation = false;
+  unsigned long readStart = millis();
 
   while (bno08x.getSensorEvent(&event)) {
+    if (millis() - readStart > SENSOR_READ_TIMEOUT_MS) {
+      Serial.println("Read timeout -- skipping cycle");
+      return;
+    }
 
     if (event.sensorId == SH2_ROTATION_VECTOR) {
       currentDto.rawReading.qx = event.un.rotationVector.i;
@@ -291,7 +308,6 @@ void loop() {
   Serial.printf("gz=%.3f  posture=%s\n", gz,
                 posture == LYING ? "LYING" : "STANDING");
 
-  //posture = detectPosture(gz);
   posture = detectPostureV2(nqw, nqx, nqy, nqz);
 
   bool needsHeartbeat = (now - lastHeartbeatUs >= HEARTBEAT_INTERVAL_US);
@@ -310,10 +326,10 @@ void loop() {
       consecutiveSendFailures = 0;
     } else {
       consecutiveSendFailures++;
-      Serial.printf("Send failed — consecutive failures: %d\n",
+      Serial.printf("Send failed -- consecutive failures: %d\n",
                     consecutiveSendFailures);
       if (consecutiveSendFailures >= MAX_SEND_FAILURES) {
-        Serial.println("Too many failures — rebooting");
+        Serial.println("Too many failures -- rebooting");
         delay(200);
         ESP.restart();
       }
@@ -395,7 +411,7 @@ Posture detectPosture(float gz) {
   switch (posture) {
     case STANDING:
       if (gz < LYING_ENTER_COS) {
-        Serial.println("→ LYING");
+        Serial.println("-> LYING");
         postureChanged = true;
         return LYING;
       }
@@ -404,10 +420,55 @@ Posture detectPosture(float gz) {
 
     case LYING:
       if (gz > LYING_EXIT_COS) {
-        Serial.println("→ STANDING");
+        Serial.println("-> STANDING");
         return STANDING;
       }
       Serial.println("  LYING");
+      break;
+  }
+  return posture;
+}
+
+Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
+  // Gravity vector components in device frame (3rd column of rotation matrix):
+  //   gx = roll  component: side-to-side tilt  (+right, -left)
+  //   gy = pitch component: fore-aft tilt       (ignored for posture)
+  //   gz = vertical component: upright-ness
+  float gx = 2.0f * (nqx * nqz - nqy * nqw);   // signed roll
+  float gy = 2.0f * (nqy * nqz + nqx * nqw);   // signed pitch
+  float gz = nqw*nqw - nqx*nqx - nqy*nqy + nqz*nqz;
+
+  // Keep gx signed so log shows direction of tilt (+right / -left).
+  float rollTilt = gx;
+
+  float rollDeg  = asinf(constrain(fabsf(rollTilt), 0.0f, 1.0f)) * 180.0f / PI;
+  float pitchDeg = asinf(constrain(fabsf(gy),       0.0f, 1.0f)) * 180.0f / PI;
+
+  Serial.printf(
+    "ROLL=%+5.1f  PITCH=%+5.1f  gx=%+.3f gy=%+.3f gz=%+.3f  [%s]\n",
+    rollTilt >= 0 ? rollDeg : -rollDeg,
+    gy       >= 0 ? pitchDeg : -pitchDeg,
+    gx, gy, gz,
+    posture == LYING ? "LYING" : "STANDING"
+  );
+
+  const float ENTER_SIN = sinf(ROLL_ENTER_DEG * PI / 180.0f);  // ~= 0.966
+  const float EXIT_SIN  = sinf(ROLL_EXIT_DEG  * PI / 180.0f);  // ~= 0.866
+
+  switch (posture) {
+    case STANDING:
+      if (fabsf(rollTilt) > ENTER_SIN) {
+        Serial.printf("-> LYING (roll %+.3f)\n", rollTilt);
+        postureChanged = true;
+        return LYING;
+      }
+      break;
+
+    case LYING:
+      if (fabsf(rollTilt) < EXIT_SIN) {
+        Serial.printf("-> STANDING (roll %+.3f)\n", rollTilt);
+        return STANDING;
+      }
       break;
   }
   return posture;
@@ -445,7 +506,7 @@ bool ensureWifi() {
 
   unsigned long start = millis();
   while (millis() - start < WIFI_TIMEOUT_MS) {
-    esp_task_wdt_reset();   // keep watchdog happy during connect wait
+    esp_task_wdt_reset();   // keep WDT happy during connect wait
     if (wifiMulti.run() == WL_CONNECTED) return true;
     delay(500);
   }
@@ -528,7 +589,7 @@ bool get(const String& url) {
   http.setTimeout(HTTP_TIMEOUT_MS);
 
   int code = http.GET();
-  Serial.printf("GET %s → %d\n", url.c_str(), code);
+  Serial.printf("GET %s -> %d\n", url.c_str(), code);
 
   if (code < 0) {
     Serial.println("GET failed: " + http.errorToString(code));
@@ -560,7 +621,7 @@ bool post(const String& url, const String& body) {
   http.addHeader("Content-Type", "application/json");
 
   int code = http.POST(body);
-  Serial.printf("POST → %d\n", code);
+  Serial.printf("POST -> %d\n", code);
   if (code < 0) {
     Serial.println("POST failed: " + http.errorToString(code));
     http.end();
@@ -579,6 +640,7 @@ bool post(const String& url, const String& body) {
 
 void sendHeartbeat() {
   get(String(SERVER_URL) + "/horses/" + HORSE_ID + "/heartbeat");
+  fetchConfig();
 }
 
 // -------------------- TIMESTAMP --------------------
@@ -593,67 +655,22 @@ String isoTimestamp() {
   return String(buf);
 }
 
+// -------------------- DIAGNOSTICS --------------------
+
 void printResetReason() {
   esp_reset_reason_t reason = esp_reset_reason();
   Serial.print("Reset reason: ");
   switch (reason) {
-    case ESP_RST_POWERON:   Serial.println("Power on");            break;
-    case ESP_RST_EXT:       Serial.println("External pin reset");  break;
-    case ESP_RST_SW:        Serial.println("Software restart");    break;
-    case ESP_RST_PANIC:     Serial.println("Panic / exception");   break;
-    case ESP_RST_INT_WDT:   Serial.println("Interrupt watchdog");  break;
-    case ESP_RST_TASK_WDT:  Serial.println("Task watchdog");       break;
-    case ESP_RST_WDT:       Serial.println("Other watchdog");      break;
-    case ESP_RST_DEEPSLEEP: Serial.println("Deep sleep wakeup");   break;
+    case ESP_RST_POWERON:   Serial.println("Power on");             break;
+    case ESP_RST_EXT:       Serial.println("External pin reset");   break;
+    case ESP_RST_SW:        Serial.println("Software restart");     break;
+    case ESP_RST_PANIC:     Serial.println("Panic / exception");    break;
+    case ESP_RST_INT_WDT:   Serial.println("Interrupt watchdog");   break;
+    case ESP_RST_TASK_WDT:  Serial.println("Task watchdog");        break;
+    case ESP_RST_WDT:       Serial.println("Other watchdog");       break;
+    case ESP_RST_DEEPSLEEP: Serial.println("Deep sleep wakeup");    break;
     case ESP_RST_BROWNOUT:  Serial.println("Brownout (low power)"); break;
-    case ESP_RST_SDIO:      Serial.println("SDIO reset");          break;
-    default:                Serial.println("Unknown");             break;
+    case ESP_RST_SDIO:      Serial.println("SDIO reset");           break;
+    default:                Serial.println("Unknown");              break;
   }
-}
-
-Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
-
-  // Gravity vector from rotation matrix (3rd column = "world up" in device frame)
-  //   gx = roll  component: side-to-side tilt — horse lying down
-  //   gy = pitch component: fore-aft tilt    — horse bending neck (ignored)
-  //   gz = yaw   component: upright-ness     — was your old criterion
-  float gx = 2.0f * (nqx * nqz - nqy * nqw);   // roll
-  float gy = 2.0f * (nqy * nqz + nqx * nqw);   // pitch
-  float gz = nqw*nqw - nqx*nqx - nqy*nqy + nqz*nqz;
-
-  float rollTilt = fabsf(gx);
-
-  // Convert to an intuitive angle
-  float rollDeg = asinf(constrain(rollTilt, 0.0f, 1.0f)) * 180.0f / PI;
-  float pitchDeg = asinf(constrain(fabsf(gy), 0.0f, 1.0f)) * 180.0f / PI;
-
-  Serial.printf(
-    "ROLL=%5.1f°  PITCH=%5.1f°  gx=%+.3f gy=%+.3f gz=%+.3f\n",
-    rollDeg,
-    pitchDeg,
-    gx,
-    gy,
-    gz
-  );
-
-  switch (posture) {
-    case STANDING:
-      // Enter LYING only on roll, not pitch:
-      //   rollTilt exceeds sin(75°) ≈ 0.966  (complement of ROLL_ENTER_COS)
-      if (rollTilt > sinf(ROLL_ENTER_DEG * PI / 180.0f)) {
-        Serial.println("→ LYING (roll)");
-        postureChanged = true;
-        return LYING;
-      }
-      break;
-
-    case LYING:
-      if (rollTilt < sinf(ROLL_EXIT_DEG * PI / 180.0f)) {
-        Serial.println("→ STANDING");
-        //postureChanged = true;
-        return STANDING;
-      }
-      break;
-  }
-  return posture;
 }
