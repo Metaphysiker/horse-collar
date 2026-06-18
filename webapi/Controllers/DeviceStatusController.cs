@@ -19,7 +19,7 @@ public class DeviceStatusController(IMongoDatabase db, HorseService horseService
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create(string horseId, DeviceStatus status)
+    public async Task<IActionResult> Create(string horseId, [FromBody] DeviceStatus status)
     {
         await horseService.EnsureExistsAsync(horseId);
         status.HorseId = horseId;

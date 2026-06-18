@@ -14,6 +14,7 @@ public class CollarConfig
     public int SleepSeconds { get; set; } = 1;
     public int SendEveryN { get; set; } = 60;
     public bool Reboot { get; set; } = false;
+    public bool Recalibrate { get; set; } = false;
     public bool NtfyEnabled { get; set; } = false;
     public bool LyingDownAlertEnabled { get; set; } = false;
     public bool HighRollAlertEnabled { get; set; } = false;
@@ -27,6 +28,10 @@ public class CollarConfig
     public float RefQx { get; set; } = 0.0f;
     public float RefQy { get; set; } = 0.0f;
     public float RefQz { get; set; } = 0.0f;
+
+    public float RollEnterDeg { get; set; } = 75.0f;
+
+    public float RollExitDeg { get; set; } = 60.0f;
 
     public bool AxesCalibrated { get; set; } = false;
 
