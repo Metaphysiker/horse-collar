@@ -83,6 +83,7 @@ struct SensorReadingV2Dto {
 Adafruit_BNO08x bno08x;
 sh2_SensorValue_t event;
 WiFiMulti wifiMulti;
+WiFiClientSecure secureClient;
 
 RTC_DATA_ATTR bool isCalibrated = false;
 
@@ -108,6 +109,9 @@ RTC_DATA_ATTR bool postureChanged = false;
 RTC_DATA_ATTR static float calAccum[4] = { 0, 0, 0, 0 };
 RTC_DATA_ATTR static int calCount = 0;
 const int CAL_SAMPLES = 10;
+
+int consecutiveMissedReadings = 0;
+const int MISSED_READING_THRESHOLD = 3;  // Trigger failure after ~4.5 seconds of silence
 
 // -------------------- CONFIG --------------------
 
@@ -160,6 +164,8 @@ void setup() {
   delay(2000);
 
   Serial.println("--- BNO085 Horse Collar Firmware ---");
+
+  secureClient.setInsecure();
 
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
   bool coldBoot = (cause == ESP_SLEEP_WAKEUP_UNDEFINED);
@@ -219,6 +225,7 @@ void loop() {
     if (event.sensorId == SH2_ROTATION_VECTOR) {
       bnoHealthy = true;
       gotReading = true;
+      consecutiveMissedReadings = 0;  // Clear the counter whenever data arrives
       eventsProcessedThisLoop++;
 
       currentDto.rawReading.qx = event.un.rotationVector.i;
@@ -264,51 +271,61 @@ void loop() {
     }
   }
 
-  if (!isCalibrated || !gotReading) {
+  // ---- 1. Safe Calibration Guard ----
+  // Only exit early if the device is still in its initial calibration phase
+  if (!isCalibrated) {
     Serial.flush();
     esp_light_sleep_start();
     return;
   }
 
-  if (!gotReading) {
-    bnoHealthy = false;
-    // No new sensor data this wake cycle — go back to sleep.
-    Serial.flush();
-    esp_light_sleep_start();
-    return;
-  }
-
-  // ---- Decide whether to transmit ----
+  // ---- 2. Evaluate Timers ----
   uint64_t now = esp_timer_get_time();
   bool needsHeartbeat = (now - lastHeartbeatUs >= heartBeatInterval);
 
+  // CRITICAL SAFETY FIX: If a heartbeat is due but we didn't pull data,
+  // the sensor has likely failed. Flag it so the server knows!
+  if (!gotReading) {
+    consecutiveMissedReadings++;
+    if (consecutiveMissedReadings >= MISSED_READING_THRESHOLD) {
+      bnoHealthy = false;
+    }
+  }
+
   readingsSinceLastSend += eventsProcessedThisLoop;
+
+  // ---- 3. Conditional Transmission Block ----
   if (readingsSinceLastSend >= sendEveryN || postureChanged || needsHeartbeat) {
-    readingsSinceLastSend = 0;
 
     if (!timeSynced) syncTime();
     String ts = isoTimestamp();
 
-    currentDto.rawReading.timestamp = ts;
-    currentDto.normalizedReading.timestamp = ts;
-    currentDto.posture = (posture == LYING ? "lying" : "standing");
-
+    // Establish the connection once for this burst
     connectWifi();
 
-    bool ok = sendReading(currentDto);
-    if (ok) {
-      consecutiveSendFailures = 0;
-    } else {
-      consecutiveSendFailures++;
-      Serial.printf("Send failed -- consecutive failures: %d\n", consecutiveSendFailures);
-      if (consecutiveSendFailures >= MAX_SEND_FAILURES) {
-        Serial.printf("Too many failures (%d) -- rebooting in 60s\n", consecutiveSendFailures);
-        Serial.flush();
-        delay(60000);
-        ESP.restart();
+    // Only send a regular data packet if we actually have fresh readings to send
+    if (readingsSinceLastSend >= sendEveryN && gotReading) {
+      readingsSinceLastSend = 0;
+      currentDto.rawReading.timestamp = ts;
+      currentDto.normalizedReading.timestamp = ts;
+      currentDto.posture = (posture == LYING ? "lying" : "standing");
+
+      bool ok = sendReading(currentDto);
+      if (ok) {
+        consecutiveSendFailures = 0;
+      } else {
+        consecutiveSendFailures++;
+        Serial.printf("Send failed -- consecutive failures: %d\n", consecutiveSendFailures);
+        if (consecutiveSendFailures >= MAX_SEND_FAILURES) {
+          Serial.printf("Too many failures (%d) -- rebooting in 60s\n", consecutiveSendFailures);
+          Serial.flush();
+          delay(60000);
+          ESP.restart();
+        }
       }
     }
 
+    // Process posture changes immediately if flagged
     if (postureChanged) {
       if (sendPostureChange(currentDto)) {
         postureChanged = false;
@@ -317,18 +334,22 @@ void loop() {
       }
     }
 
+    // Fire the heartbeat regardless of sensor state
     if (needsHeartbeat) {
       lastHeartbeatUs = now;
-      sendHeartbeat();
+      sendHeartbeat();  // Sends diagnostic data containing the accurate bnoHealthy status
       fetchConfig();
       if (powerMode == MAINTENANCE) {
         ESP.restart();
       }
     }
 
+    // Cleanly tear down the shared TLS tunnel and radio
+    secureClient.stop();
     disconnectWifi();
   }
 
+  // Return to light sleep waiting for the next 1.5s timer or hardware interrupt
   Serial.flush();
   esp_light_sleep_start();
 }
@@ -399,7 +420,6 @@ void fetchConfig() {
   String url = String(SERVER_URL) + "/horses/" + HORSE_ID + "/config";
 
   HTTPClient http;
-  WiFiClientSecure secureClient;
   secureClient.setInsecure();
   http.begin(secureClient, url);
   http.setTimeout(HTTP_TIMEOUT_MS);
@@ -440,8 +460,12 @@ void fetchConfig() {
       refQx = 0.0f;
       refQy = 0.0f;
       refQz = 0.0f;
-      refQw = 1.0f;  // ADD THIS
+      refQw = 1.0f;
+
       Serial.println("Remote recalibration triggered");
+
+      // ACKNOWLEDGE THE COMMAND: Tell the server we have consumed the request
+      post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/recalibrate/clear", "{}");
     }
 
     if (doc["reboot"] | false) {
@@ -584,12 +608,12 @@ bool get(const String& url) {
   if (!ensureWifi()) return false;
 
   HTTPClient http;
-  WiFiClientSecure secureClient;
   if (url.startsWith("https")) {
-    secureClient.setInsecure();
+    http.setReuse(true);
     http.begin(secureClient, url);
   } else {
-    http.begin(url);
+    WiFiClient plainClient;
+    http.begin(plainClient, url);
   }
   http.setTimeout(HTTP_TIMEOUT_MS);
 
@@ -614,12 +638,12 @@ bool post(const String& url, const String& body) {
   if (!ensureWifi()) return false;
 
   HTTPClient http;
-  WiFiClientSecure secureClient;
   if (url.startsWith("https")) {
-    secureClient.setInsecure();
+    http.setReuse(true);
     http.begin(secureClient, url);
   } else {
-    http.begin(url);
+    WiFiClient plainClient;
+    http.begin(plainClient, url);
   }
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.addHeader("Content-Type", "application/json");

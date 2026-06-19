@@ -48,6 +48,14 @@ public class CollarConfigController(IMongoDatabase db, NtfyService ntfy) : Contr
         return NoContent();
     }
 
+    [HttpPost("recalibrate/clear")]
+    public async Task<IActionResult> ClearRecalibrate(string horseId)
+    {
+        var update = Builders<CollarConfig>.Update.Set(c => c.Recalibrate, false);
+        await _configs.UpdateOneAsync(c => c.HorseId == horseId, update);
+        return NoContent();
+    }
+
     [HttpPost("test-notification")]
     public async Task<IActionResult> TestNotification(string horseId)
     {
