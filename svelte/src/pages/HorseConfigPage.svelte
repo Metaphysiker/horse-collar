@@ -112,6 +112,32 @@
           <input type="number" min="1" step="1" bind:value={config.rollExitDeg} />
         </label>
 
+
+        <label class="toggle-row">
+          <span>
+            UseTiltForPosture
+            <span class="hint">Detect-Modus auswählen</span>
+          </span>
+          <input type="checkbox" bind:checked={config.useTiltForPosture} />
+        </label>
+
+        <label class="toggle-row">
+          <span>
+            Reboot
+            <span class="hint">Reboot</span>
+          </span>
+          <input type="checkbox" bind:checked={config.reboot} />
+        </label>
+
+        <label class="toggle-row">
+          <span>
+            Recalibrate
+            <span class="hint">Recalibrate</span>
+          </span>
+          <input type="checkbox" bind:checked={config.recalibrate} />
+        </label>
+
+
       </section>
 
       <section>

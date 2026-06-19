@@ -88,9 +88,9 @@ RTC_DATA_ATTR bool    isCalibrated = false;
 
 uint64_t lastHeartbeatUs      = 0;
 int      readingsSinceLastSend = 0;
-int      consecutiveSendFailures = 0;
+RTC_DATA_ATTR int      consecutiveSendFailures = 0;
 
-bool   timeSynced = false;
+RTC_DATA_ATTR bool   timeSynced = false;
 
 RTC_DATA_ATTR bool firstBoot = true;
 
@@ -108,6 +108,7 @@ const  int   CAL_SAMPLES = 10;
 // -------------------- CONFIG --------------------
 
 RTC_DATA_ATTR float   refQx = 0.0f, refQy = 0.0f, refQz = 0.0f, refQw = 1.0f;
+RTC_DATA_ATTR bool useTiltForPosture = false;  // false = V2 roll-only, true = V3 tilt
 
 uint32_t reportInterval = 1000000;  // 1 Hz
 uint32_t sleepTimerUs = 1500000ULL; // One minute in microseconds
@@ -234,7 +235,7 @@ void loop() {
   currentDto.normalizedReading.horseId     = HORSE_ID;
 
   // ---- Posture detection ----
-  Posture newPosture = detectPostureV2(
+  Posture newPosture = detectPostureV3(
     currentDto.normalizedReading.qw,
     currentDto.normalizedReading.qx,
     currentDto.normalizedReading.qy,
@@ -253,7 +254,9 @@ void loop() {
   if (readingsSinceLastSend >= sendEveryN || postureChanged || needsHeartbeat) {
     readingsSinceLastSend = 0;
 
+    if (!timeSynced) syncTime();
     String ts = isoTimestamp();
+
     currentDto.rawReading.timestamp        = ts;
     currentDto.normalizedReading.timestamp = ts;
     currentDto.posture = (posture == LYING ? "lying" : "standing");
@@ -267,8 +270,9 @@ void loop() {
       consecutiveSendFailures++;
       Serial.printf("Send failed -- consecutive failures: %d\n", consecutiveSendFailures);
       if (consecutiveSendFailures >= MAX_SEND_FAILURES) {
-        Serial.println("Too many failures -- rebooting");
-        delay(200);
+        Serial.printf("Too many failures (%d) -- rebooting in 60s\n", consecutiveSendFailures);
+        Serial.flush();
+        delay(60000);
         ESP.restart();
       }
     }
@@ -312,10 +316,10 @@ void connectWifi() {
 }
 
 bool ensureWifi() {
-  if (WiFi.getMode() == WIFI_OFF) {
+  if (WiFi.getMode() != WIFI_STA) {
     WiFi.mode(WIFI_STA);
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
   }
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
   if (wifiMulti.run() == WL_CONNECTED) return true;
 
   unsigned long start = millis();
@@ -381,6 +385,8 @@ void fetchConfig() {
 
     sleepTimerUs = doc["sleepTimerUs"] | sleepTimerUs;
     heartBeatInterval = doc["heartBeatInterval"] | heartBeatInterval;
+
+    useTiltForPosture = doc["useTiltForPosture"] | useTiltForPosture;
 
     if (doc["recalibrate"] | false) {
       isCalibrated = false;
@@ -488,6 +494,41 @@ Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
   return posture;
 }
 
+Posture detectPostureV3(float nqw, float nqx, float nqy, float nqz) {
+  float gx = 2.0f * (nqx * nqz - nqy * nqw);
+  float gy = 2.0f * (nqy * nqz + nqx * nqw);
+  float gz = nqw*nqw - nqx*nqx - nqy*nqy + nqz*nqz;
+
+  float rollDeg  = asinf(constrain(fabsf(gx), 0.0f, 1.0f)) * 180.0f / PI;
+  float pitchDeg = asinf(constrain(fabsf(gy), 0.0f, 1.0f)) * 180.0f / PI;
+  float tiltDeg  = acosf(constrain(gz, -1.0f, 1.0f)) * 180.0f / PI;
+
+  Serial.printf("ROLL=%+5.1f  PITCH=%+5.1f  TILT=%+5.1f  gx=%+.3f gy=%+.3f gz=%+.3f  [%s]\n",
+                gx >= 0 ? rollDeg : -rollDeg,
+                gy >= 0 ? pitchDeg : -pitchDeg,
+                tiltDeg, gx, gy, gz,
+                posture == LYING ? "LYING" : "STANDING");
+
+  float metric = useTiltForPosture ? tiltDeg : rollDeg;
+
+  switch (posture) {
+    case STANDING:
+      if (metric > rollEnterDeg) {
+        Serial.printf("-> LYING (%s=%.1f)\n", useTiltForPosture ? "tilt" : "roll", metric);
+        return LYING;
+      }
+      break;
+
+    case LYING:
+      if (metric < rollExitDeg) {
+        Serial.printf("-> STANDING (%s=%.1f)\n", useTiltForPosture ? "tilt" : "roll", metric);
+        return STANDING;
+      }
+      break;
+  }
+  return posture;
+}
+
 
 // -------------------- NETWORK --------------------
 
@@ -571,6 +612,10 @@ Quat multiply(const Quat& a, const Quat& b) {
 // -------------------- TIMESTAMP --------------------
 
 String isoTimestamp() {
+  if (!timeSynced) {
+    Serial.println("WARNING: timestamp not synced");
+    return "1970-01-01T00:00:00Z";
+  }
   time_t now;
   time(&now);
   struct tm t;
