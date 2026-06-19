@@ -44,53 +44,72 @@
     <form onsubmit={(e) => { e.preventDefault(); save(); }}>
 
       <section>
-        <h2>Timing</h2>
+        <h2>Current Main Settings</h2>
 
         <label>
-          Sleep interval (seconds)
-          <span class="hint">How long the collar sleeps between readings — lower = more data, shorter battery</span>
+          ReportInterval (microseconds)
+          <span class="hint">Wie oft der BNO-Sensor reportet.</span>
           <div class="presets">
-            <button type="button" class:active={config.sleepSeconds === 1}  onclick={() => config.sleepSeconds = 1}>1s — Max</button>
-            <button type="button" class:active={config.sleepSeconds === 2}  onclick={() => config.sleepSeconds = 2}>2s — Collection</button>
-            <button type="button" class:active={config.sleepSeconds === 10} onclick={() => config.sleepSeconds = 10}>10s — Dense</button>
-            <button type="button" class:active={config.sleepSeconds === 30} onclick={() => config.sleepSeconds = 30}>30s — Normal</button>
+            <button type="button" class:active={config.reportInterval === 1000000}  onclick={() => config.reportInterval = 1000000}>1 Sekunde</button>
+            <button type="button" class:active={config.reportInterval === 2000000}  onclick={() => config.reportInterval = 2000000}>2 Sekunden</button>
           </div>
-          <input type="number" min="1" max="300" step="1" bind:value={config.sleepSeconds} />
+          <input type="number" min="1" step="1" bind:value={config.reportInterval} />
+        </label>
+
+        <label>
+          SleepTimerUs (microseconds)
+          <span class="hint">Fester Timer, falls Interrupt pin ausgeht. Sollte länger sein als reportInterval</span>
+          <div class="presets">
+            <button type="button" class:active={config.sleepTimerUs === 1500000}  onclick={() => config.sleepTimerUs = 1500000}>1.5 Sekunde</button>
+            <button type="button" class:active={config.sleepTimerUs === 2500000}  onclick={() => config.sleepTimerUs = 2500000}>2.5 Sekunden</button>
+          </div>
+          <input type="number" min="1" step="1" bind:value={config.sleepTimerUs} />
+        </label>
+
+          <label>
+          HeartBeatInterval (microseconds)
+          <span class="hint">Wie lange zum nächsten Heartbeat.</span>
+          <div class="presets">
+            <button type="button" class:active={config.heartBeatInterval === 60000000}  onclick={() => config.heartBeatInterval = 60000000}>1 Minute</button>
+            <button type="button" class:active={config.heartBeatInterval === 180000000}  onclick={() => config.heartBeatInterval = 180000000}>3 Minuten</button>
+          </div>
+          <input type="number" min="1" step="1" bind:value={config.heartBeatInterval} />
         </label>
 
         <label>
           Send every N readings
-          <span class="hint">Upload a batch after this many wake cycles — higher = less WiFi, better battery</span>
+          <span class="hint">Send a Reading after every N cycles</span>
           <div class="presets">
             <button type="button" class:active={config.sendEveryN === 5}   onclick={() => config.sendEveryN = 5}>5 — Collection</button>
             <button type="button" class:active={config.sendEveryN === 20}  onclick={() => config.sendEveryN = 20}>20 — Dense</button>
             <button type="button" class:active={config.sendEveryN === 60}  onclick={() => config.sendEveryN = 60}>60 — Normal</button>
             <button type="button" class:active={config.sendEveryN === 200} onclick={() => config.sendEveryN = 200}>200 — Battery</button>
           </div>
-          <input type="number" min="1" max="1000" step="1" bind:value={config.sendEveryN} />
-        </label>
-
-      </section>
-
-      <section>
-        <h2>BaselineShift Sensitivity</h2>
-
-        <label>
-          Accel delta threshold (m/s²)
-          <span class="hint">How much acceleration must change from the running average to trigger an alert — lower = more sensitive</span>
-          <input type="number" min="0.1" max="10" step="0.1" bind:value={config.changeAccel} />
+          <input type="number" min="1" step="1" bind:value={config.sendEveryN} />
         </label>
 
         <label>
-          Pitch delta threshold (°)
-          <span class="hint">How many degrees pitch must change from baseline</span>
-          <input type="number" min="1" max="90" step="1" bind:value={config.changePitch} />
+          Roll Enter Deg
+          <span class="hint">Ab wie viel Grad Roll Enter kommt.</span>
+          <div class="presets">
+            <button type="button" class:active={config.rollEnterDeg === 45}   onclick={() => config.rollEnterDeg = 45}>45</button>
+            <button type="button" class:active={config.rollEnterDeg === 55}  onclick={() => config.rollEnterDeg = 55}>55</button>
+            <button type="button" class:active={config.rollEnterDeg === 65}  onclick={() => config.rollEnterDeg = 65}>65</button>
+            <button type="button" class:active={config.rollEnterDeg === 75} onclick={() => config.rollEnterDeg = 75}>75</button>
+          </div>
+          <input type="number" min="1" step="1" bind:value={config.rollEnterDeg} />
         </label>
 
         <label>
-          Roll delta threshold (°)
-          <span class="hint">How many degrees roll must change from baseline</span>
-          <input type="number" min="1" max="90" step="1" bind:value={config.changeRoll} />
+          Roll Exit Deg
+          <span class="hint">Ab wie viel Grad Roll Exit kommt.</span>
+          <div class="presets">
+            <button type="button" class:active={config.rollExitDeg === 45}   onclick={() => config.rollExitDeg = 45}>45</button>
+            <button type="button" class:active={config.rollExitDeg === 55}  onclick={() => config.rollExitDeg = 55}>55</button>
+            <button type="button" class:active={config.rollExitDeg === 65}  onclick={() => config.rollExitDeg = 65}>65</button>
+            <button type="button" class:active={config.rollExitDeg === 75} onclick={() => config.rollExitDeg = 75}>75</button>
+          </div>
+          <input type="number" min="1" step="1" bind:value={config.rollExitDeg} />
         </label>
 
       </section>

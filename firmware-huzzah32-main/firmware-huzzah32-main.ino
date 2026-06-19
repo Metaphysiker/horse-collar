@@ -20,8 +20,6 @@
 #define WIFI_TIMEOUT_MS        15000
 #define HTTP_TIMEOUT_MS        5000
 #define NTP_TIMEOUT_MS         10000
-#define HEARTBEAT_INTERVAL_US  (60ULL * 1000000ULL)
-#define SLEEP_TIMER_US (1500ULL * 1000ULL)  // 1.5s — longer than sensor interval
 #define MAX_SEND_FAILURES      5
 
 
@@ -86,13 +84,9 @@ Adafruit_BNO08x  bno08x;
 sh2_SensorValue_t event;
 WiFiMulti        wifiMulti;
 
-uint32_t reportInterval = 1000000;  // 1 Hz
-
-bool    isCalibrated = false;
-float   refQx = 0.0f, refQy = 0.0f, refQz = 0.0f, refQw = 1.0f;
+RTC_DATA_ATTR bool    isCalibrated = false;
 
 uint64_t lastHeartbeatUs      = 0;
-int      sendEveryN           = 60;
 int      readingsSinceLastSend = 0;
 int      consecutiveSendFailures = 0;
 
@@ -107,14 +101,22 @@ Posture posture        = STANDING;
 bool    postureChanged = false;
 
 // Calibration accumulators
-static float calAccum[4] = { 0, 0, 0, 0 };
-static int   calCount    = 0;
+RTC_DATA_ATTR static float calAccum[4] = { 0, 0, 0, 0 };
+RTC_DATA_ATTR static int   calCount    = 0;
 const  int   CAL_SAMPLES = 10;
+
+// -------------------- CONFIG --------------------
+
+RTC_DATA_ATTR float   refQx = 0.0f, refQy = 0.0f, refQz = 0.0f, refQw = 1.0f;
+
+uint32_t reportInterval = 1000000;  // 1 Hz
+uint32_t sleepTimerUs = 1500000ULL; // One minute in microseconds
+uint32_t heartBeatInterval = 60000000ULL; // One minute in microseconds
+int      sendEveryN           = 60;
 
 // Hysteresis thresholds (degrees of roll)
 float rollEnterDeg = 75.0f;
 float rollExitDeg  = 60.0f;
-
 
 // -------------------- FORWARD DECLARATIONS --------------------
 
@@ -163,7 +165,7 @@ void setup() {
   // GPIO14 wakeup as fallback; primary wakeup is the 500 ms timer below
   pinMode(BNO_INT_PIN, INPUT_PULLUP);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)BNO_INT_PIN, 0);
-  esp_sleep_enable_timer_wakeup(SLEEP_TIMER_US);
+  esp_sleep_enable_timer_wakeup(sleepTimerUs);
 
   for (auto& n : WIFI_NETWORKS)
     wifiMulti.addAP(n.ssid, n.password);
@@ -245,7 +247,7 @@ void loop() {
 
   // ---- Decide whether to transmit ----
   uint64_t now           = esp_timer_get_time();
-  bool     needsHeartbeat = (now - lastHeartbeatUs >= HEARTBEAT_INTERVAL_US);
+  bool     needsHeartbeat = (now - lastHeartbeatUs >= heartBeatInterval);
 
   readingsSinceLastSend++;
   if (readingsSinceLastSend >= sendEveryN || postureChanged || needsHeartbeat) {
@@ -272,8 +274,11 @@ void loop() {
     }
 
     if (postureChanged) {
-      sendPostureChange(currentDto);
-      postureChanged = false;
+      if (sendPostureChange(currentDto)) {
+        postureChanged = false;
+      } else {
+        Serial.println("Posture change send failed -- will retry next cycle");
+      }
     }
 
     if (needsHeartbeat) {
@@ -364,19 +369,24 @@ void fetchConfig() {
     JsonDocument doc;
     deserializeJson(doc, http.getString());
 
+    reportInterval = doc["reportInterval"] | reportInterval;
     sendEveryN = doc["sendEveryN"] | sendEveryN;
-    refQx      = doc["refQx"]      | refQx;
-    refQy      = doc["refQy"]      | refQy;
-    refQz      = doc["refQz"]      | refQz;
-    refQw      = doc["refQw"]      | refQw;
+    //refQx      = doc["refQx"]      | refQx;
+    //refQy      = doc["refQy"]      | refQy;
+    //refQz      = doc["refQz"]      | refQz;
+    //refQw      = doc["refQw"]      | refQw;
 
     rollEnterDeg = doc["rollEnterDeg"] | rollEnterDeg;
     rollExitDeg = doc["rollExitDeg"] | rollExitDeg;
+
+    sleepTimerUs = doc["sleepTimerUs"] | sleepTimerUs;
+    heartBeatInterval = doc["heartBeatInterval"] | heartBeatInterval;
 
     if (doc["recalibrate"] | false) {
       isCalibrated = false;
       calCount     = 0;
       memset(calAccum, 0, sizeof(calAccum));
+      refQx = 0.0f; refQy = 0.0f; refQz = 0.0f; refQw = 1.0f; // ADD THIS
       Serial.println("Remote recalibration triggered");
     }
 
@@ -582,14 +592,6 @@ int voltageToPercent(float voltage) {
   if (voltage <= 3.4f)  return 0;
   return int((voltage - 3.4f) / (4.25f - 3.4f) * 100.0f);
 }
-
-int getBatteryPercent() {
-  float v = readBatteryVoltage();
-  int   pct = voltageToPercent(v);
-  Serial.printf("Battery: %.2fV (%d%%)\n", v, pct);
-  return pct;
-}
-
 
 // -------------------- SEND READINGS --------------------
 

@@ -29,9 +29,13 @@ public class CollarConfig
     public float RefQy { get; set; } = 0.0f;
     public float RefQz { get; set; } = 0.0f;
 
-    public float RollEnterDeg { get; set; } = 75.0f;
+    public float ReportInterval { get; set;} = 1000000.0f;
 
+    public float RollEnterDeg { get; set; } = 75.0f;
     public float RollExitDeg { get; set; } = 60.0f;
+
+    public float HeartBeatInterval { get; set; } = 1000000.0f;
+    public float SleepTimerUs { get; set; } = 1500000.0f;
 
     public bool AxesCalibrated { get; set; } = false;
 
