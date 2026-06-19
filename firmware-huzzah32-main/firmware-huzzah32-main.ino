@@ -214,9 +214,8 @@ void setup() {
 // -------------------- LOOP --------------------
 
 void loop() {
-  // Re-init I2C only when waking from sleep (Wire state may be stale)
-  Wire.begin();
-  delay(10);
+  // FIXED: Removed the aggressive Wire.end() and Wire.begin() sequence.
+  // The ESP32 retains full configuration and clock gating states during light sleep.
 
   bool gotReading = false;
   int eventsProcessedThisLoop = 0;  // Track how many frames we drain
@@ -463,7 +462,6 @@ void fetchConfig() {
   if (triggerRecalibrate) {
     isCalibrated = false;
     calCount = 0;
-    // Ensure calAccum is a fixed array (e.g. float calAccum[3]) for this to be safe!
     memset(calAccum, 0, sizeof(calAccum));
     refQx = 0.0f;
     refQy = 0.0f;
@@ -499,8 +497,6 @@ void fetchConfig() {
 
 // -------------------- CALIBRATION --------------------
 
-// NOTE: Simple component averaging is valid here because samples are taken
-// while the horse is stationary, so all quaternions are very close together.
 void calibrateAccumulate(float qx, float qy, float qz, float qw) {
   calAccum[0] += qx;
   calAccum[1] += qy;
@@ -546,10 +542,6 @@ SensorReadingV2 normalize(const SensorReadingV2& raw) {
 // -------------------- POSTURE DETECTION --------------------
 
 Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
-  // Gravity vector in device frame (3rd column of rotation matrix):
-  //   gx = roll  (side-to-side, +right / -left)
-  //   gy = pitch (fore-aft, ignored for posture)
-  //   gz = vertical uprightness
   float gx = 2.0f * (nqx * nqz - nqy * nqw);
   float gy = 2.0f * (nqy * nqz + nqx * nqw);
   float gz = nqw * nqw - nqx * nqx - nqy * nqy + nqz * nqz;
@@ -563,8 +555,8 @@ Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
                 gx, gy, gz,
                 posture == LYING ? "LYING" : "STANDING");
 
-  const float ENTER_SIN = sinf(rollEnterDeg * PI / 180.0f);  // ~0.966
-  const float EXIT_SIN = sinf(rollExitDeg * PI / 180.0f);    // ~0.866
+  const float ENTER_SIN = sinf(rollEnterDeg * PI / 180.0f);
+  const float EXIT_SIN = sinf(rollExitDeg * PI / 180.0f);
 
   switch (posture) {
     case STANDING:
@@ -728,6 +720,7 @@ int voltageToPercent(float voltage) {
   return int((voltage - 3.4f) / (4.25f - 3.4f) * 100.0f);
 }
 
+
 // -------------------- SEND READINGS --------------------
 
 bool sendReading(const SensorReadingV2Dto& dto) {
@@ -768,9 +761,7 @@ bool wokeFromDeepSleep() {
 
 void runMaintenanceMode() {
   Serial.println("Maintenance mode wakeup");
-  Serial.printf(
-    "Wake cause: %d\n",
-    esp_sleep_get_wakeup_cause());
+  Serial.printf("Wake cause: %d\n", esp_sleep_get_wakeup_cause());
 
   connectWifi();
 
@@ -793,14 +784,9 @@ void runMaintenanceMode() {
     ESP.restart();
   }
 
-  Serial.printf(
-    "Sleeping for %.1f minutes\n",
-    maintenanceWakeIntervalUs / 60000000.0f);
-
+  Serial.printf("Sleeping for %.1f minutes\n", maintenanceWakeIntervalUs / 60000000.0f);
   Serial.flush();
 
-  esp_sleep_enable_timer_wakeup(
-    maintenanceWakeIntervalUs);
-
+  esp_sleep_enable_timer_wakeup(maintenanceWakeIntervalUs);
   esp_deep_sleep_start();
 }
