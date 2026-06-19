@@ -214,7 +214,6 @@ void setup() {
 // -------------------- LOOP --------------------
 
 void loop() {
-  Wire.end();
   // Re-init I2C only when waking from sleep (Wire state may be stale)
   Wire.begin();
   delay(10);
@@ -295,10 +294,13 @@ void loop() {
   readingsSinceLastSend += eventsProcessedThisLoop;
 
   // ---- 3. Conditional Transmission Block ----
-  if (readingsSinceLastSend >= sendEveryN || postureChanged || needsHeartbeat) {
-
+  if ((readingsSinceLastSend >= sendEveryN && gotReading) || postureChanged || needsHeartbeat) {
     if (!timeSynced) syncTime();
     String ts = isoTimestamp();
+
+    currentDto.rawReading.timestamp = ts;
+    currentDto.normalizedReading.timestamp = ts;
+    currentDto.posture = (posture == LYING ? "lying" : "standing");
 
     // Establish the connection once for this burst
     connectWifi();
@@ -306,9 +308,6 @@ void loop() {
     // Only send a regular data packet if we actually have fresh readings to send
     if (readingsSinceLastSend >= sendEveryN && gotReading) {
       readingsSinceLastSend = 0;
-      currentDto.rawReading.timestamp = ts;
-      currentDto.normalizedReading.timestamp = ts;
-      currentDto.posture = (posture == LYING ? "lying" : "standing");
 
       bool ok = sendReading(currentDto);
       if (ok) {
@@ -424,58 +423,77 @@ void fetchConfig() {
   http.begin(secureClient, url);
   http.setTimeout(HTTP_TIMEOUT_MS);
 
+  // Local tracking flags to defer operations
+  bool triggerRecalibrate = false;
+  bool triggerReboot = false;
+  bool bnoIntervalChanged = false;
+  bool sleepTimerChanged = false;
+
+  uint32_t targetReportInterval = reportInterval;
+  uint64_t targetSleepTimerUs = sleepTimerUs;
+
   if (http.GET() == 200) {
     JsonDocument doc;
     deserializeJson(doc, http.getString());
 
-    reportInterval = doc["reportInterval"] | reportInterval;
+    targetReportInterval = doc["reportInterval"] | reportInterval;
     sendEveryN = doc["sendEveryN"] | sendEveryN;
-    //refQx      = doc["refQx"]      | refQx;
-    //refQy      = doc["refQy"]      | refQy;
-    //refQz      = doc["refQz"]      | refQz;
-    //refQw      = doc["refQw"]      | refQw;
 
     rollEnterDeg = doc["rollEnterDeg"] | rollEnterDeg;
     rollExitDeg = doc["rollExitDeg"] | rollExitDeg;
 
-    sleepTimerUs = doc["sleepTimerUs"] | sleepTimerUs;
+    targetSleepTimerUs = doc["sleepTimerUs"] | sleepTimerUs;
     heartBeatInterval = doc["heartBeatInterval"] | heartBeatInterval;
-
     useTiltForPosture = doc["useTiltForPosture"] | useTiltForPosture;
 
     String mode = doc["powerMode"] | "active";
+    powerMode = (mode == "maintenance") ? MAINTENANCE : ACTIVE;
 
-    if (mode == "maintenance")
-      powerMode = MAINTENANCE;
-    else
-      powerMode = ACTIVE;
+    maintenanceWakeIntervalUs = doc["maintenanceWakeIntervalUs"] | maintenanceWakeIntervalUs;
 
-    maintenanceWakeIntervalUs =
-      doc["maintenanceWakeIntervalUs"] | maintenanceWakeIntervalUs;
+    if (doc["recalibrate"] | false) triggerRecalibrate = true;
+    if (doc["reboot"] | false) triggerReboot = true;
 
-    if (doc["recalibrate"] | false) {
-      isCalibrated = false;
-      calCount = 0;
-      memset(calAccum, 0, sizeof(calAccum));
-      refQx = 0.0f;
-      refQy = 0.0f;
-      refQz = 0.0f;
-      refQw = 1.0f;
+    if (targetReportInterval != reportInterval) bnoIntervalChanged = true;
+    if (targetSleepTimerUs != sleepTimerUs) sleepTimerChanged = true;
+  }
 
-      Serial.println("Remote recalibration triggered");
+  http.end();
 
-      // ADD THIS LINE BELOW TO CALL YOUR NEW .NET ENDPOINT:
-      post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/recalibrate/clear", "{}");
-    }
+  if (triggerRecalibrate) {
+    isCalibrated = false;
+    calCount = 0;
+    // Ensure calAccum is a fixed array (e.g. float calAccum[3]) for this to be safe!
+    memset(calAccum, 0, sizeof(calAccum));
+    refQx = 0.0f;
+    refQy = 0.0f;
+    refQz = 0.0f;
+    refQw = 1.0f;
 
-    if (doc["reboot"] | false) {
-      post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/reboot/clear", "{}");
-      Serial.println("Remote reboot triggered");
-      delay(500);
-      ESP.restart();
+    Serial.println("Remote recalibration triggered");
+    post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/recalibrate/clear", "{}");
+  }
+
+  if (triggerReboot) {
+    post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/reboot/clear", "{}");
+    Serial.println("Remote reboot triggered");
+    delay(500);
+    ESP.restart();
+  }
+
+  if (bnoIntervalChanged) {
+    reportInterval = targetReportInterval;
+    Serial.printf("Hardware Update: Changing BNO report interval to %u us\n", reportInterval);
+    if (!bno08x.enableReport(SH2_ROTATION_VECTOR, reportInterval)) {
+      Serial.println("Failed to update BNO report interval!");
     }
   }
-  http.end();
+
+  if (sleepTimerChanged) {
+    sleepTimerUs = targetSleepTimerUs;
+    Serial.printf("Hardware Update: Changing ESP sleep timer to %llu us\n", sleepTimerUs);
+    esp_sleep_enable_timer_wakeup(sleepTimerUs);
+  }
 }
 
 
