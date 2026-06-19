@@ -137,6 +137,48 @@
           <input type="checkbox" bind:checked={config.recalibrate} />
         </label>
 
+        <select bind:value={config.powerMode}>
+          <option value="active">active</option>
+          <option value="maintenance">maintenance</option>
+        </select>
+
+        <label>
+  Maintenance Wake Interval
+  <span class="hint">Zeitintervall für Wartungs-Wakeup.</span>
+
+  <div class="presets">
+    <button
+      type="button"
+      class:active={config.maintenanceWakeIntervalUs === 15 * 60 * 1_000_000}
+      onclick={() => config.maintenanceWakeIntervalUs = 15 * 60 * 1_000_000}
+    >
+      15 min
+    </button>
+
+    <button
+      type="button"
+      class:active={config.maintenanceWakeIntervalUs === 30 * 60 * 1_000_000}
+      onclick={() => config.maintenanceWakeIntervalUs = 30 * 60 * 1_000_000}
+    >
+      30 min
+    </button>
+
+    <button
+      type="button"
+      class:active={config.maintenanceWakeIntervalUs === 60 * 60 * 1_000_000}
+      onclick={() => config.maintenanceWakeIntervalUs = 60 * 60 * 1_000_000}
+    >
+      60 min
+    </button>
+  </div>
+
+  <input
+    type="number"
+    min="1"
+    step="1"
+    bind:value={config.maintenanceWakeIntervalUs}
+  />
+</label>
 
       </section>
 

@@ -39,6 +39,9 @@ public class CollarConfig
     public float HeartBeatInterval { get; set; } = 1000000.0f;
     public float SleepTimerUs { get; set; } = 1500000.0f;
 
+    public string PowerMode { get; set;} = "active";
+
+    public float MaintenanceWakeIntervalUs { get; set;} = 1800000000.0f;
     public bool AxesCalibrated { get; set; } = false;
 
     // Body-frame axes in sensor-relative space — set by orientation calibration wizard

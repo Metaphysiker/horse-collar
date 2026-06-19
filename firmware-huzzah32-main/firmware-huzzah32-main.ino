@@ -15,12 +15,12 @@
 
 // -------------------- DEFINES --------------------
 
-#define BNO_INT_PIN            14
-#define BATTERY_PIN            A13
-#define WIFI_TIMEOUT_MS        15000
-#define HTTP_TIMEOUT_MS        5000
-#define NTP_TIMEOUT_MS         10000
-#define MAX_SEND_FAILURES      5
+#define BNO_INT_PIN 14
+#define BATTERY_PIN A13
+#define WIFI_TIMEOUT_MS 15000
+#define HTTP_TIMEOUT_MS 5000
+#define NTP_TIMEOUT_MS 10000
+#define MAX_SEND_FAILURES 5
 
 
 // -------------------- STRUCTS --------------------
@@ -38,20 +38,20 @@ struct SensorReadingV2 {
   float qy = 0.0f;
   float qz = 0.0f;
 
-  float acceleration    = 0.0f;
+  float acceleration = 0.0f;
   float angularVelocity = 0.0f;
 
   String alertReason;
   String readingType;
 
   void toJson(JsonObject obj) const {
-    obj["horseId"]         = horseId;
-    obj["timestamp"]       = timestamp;
-    obj["qw"]              = qw;
-    obj["qx"]              = qx;
-    obj["qy"]              = qy;
-    obj["qz"]              = qz;
-    obj["acceleration"]    = acceleration;
+    obj["horseId"] = horseId;
+    obj["timestamp"] = timestamp;
+    obj["qw"] = qw;
+    obj["qx"] = qx;
+    obj["qy"] = qy;
+    obj["qz"] = qz;
+    obj["acceleration"] = acceleration;
     obj["angularVelocity"] = angularVelocity;
     if (alertReason.length() > 0)
       obj["alertReason"] = alertReason;
@@ -66,7 +66,7 @@ struct SensorReadingV2Dto {
 
   String toJson() const {
     JsonDocument doc;
-    JsonObject raw        = doc["rawReading"].to<JsonObject>();
+    JsonObject raw = doc["rawReading"].to<JsonObject>();
     rawReading.toJson(raw);
     JsonObject normalized = doc["normalizedReading"].to<JsonObject>();
     normalizedReading.toJson(normalized);
@@ -80,75 +80,107 @@ struct SensorReadingV2Dto {
 
 // -------------------- GLOBALS --------------------
 
-Adafruit_BNO08x  bno08x;
+Adafruit_BNO08x bno08x;
 sh2_SensorValue_t event;
-WiFiMulti        wifiMulti;
+WiFiMulti wifiMulti;
 
-RTC_DATA_ATTR bool    isCalibrated = false;
+RTC_DATA_ATTR bool isCalibrated = false;
 
-uint64_t lastHeartbeatUs      = 0;
-int      readingsSinceLastSend = 0;
-RTC_DATA_ATTR int      consecutiveSendFailures = 0;
+RTC_DATA_ATTR uint64_t lastHeartbeatUs = 0;
+int readingsSinceLastSend = 0;
+RTC_DATA_ATTR int consecutiveSendFailures = 0;
 
-RTC_DATA_ATTR bool   timeSynced = false;
-
-RTC_DATA_ATTR bool firstBoot = true;
+RTC_DATA_ATTR bool timeSynced = false;
 
 SensorReadingV2Dto currentDto;
 
-enum Posture { STANDING, LYING };
-Posture posture        = STANDING;
-bool    postureChanged = false;
+enum PowerMode {
+  ACTIVE,
+  MAINTENANCE
+};
+
+enum Posture { STANDING,
+               LYING };
+RTC_DATA_ATTR Posture posture = STANDING;
+RTC_DATA_ATTR bool postureChanged = false;
 
 // Calibration accumulators
 RTC_DATA_ATTR static float calAccum[4] = { 0, 0, 0, 0 };
-RTC_DATA_ATTR static int   calCount    = 0;
-const  int   CAL_SAMPLES = 10;
+RTC_DATA_ATTR static int calCount = 0;
+const int CAL_SAMPLES = 10;
 
 // -------------------- CONFIG --------------------
 
-RTC_DATA_ATTR float   refQx = 0.0f, refQy = 0.0f, refQz = 0.0f, refQw = 1.0f;
+RTC_DATA_ATTR float refQx = 0.0f, refQy = 0.0f, refQz = 0.0f, refQw = 1.0f;
 RTC_DATA_ATTR bool useTiltForPosture = false;  // false = V2 roll-only, true = V3 tilt
 
 uint32_t reportInterval = 1000000;  // 1 Hz
-uint32_t sleepTimerUs = 1500000ULL; // One minute in microseconds
-uint32_t heartBeatInterval = 60000000ULL; // One minute in microseconds
-int      sendEveryN           = 60;
+uint64_t sleepTimerUs = 1500000ULL;
+uint64_t heartBeatInterval = 60000000ULL;  // One minute in microseconds
+int sendEveryN = 60;
 
 // Hysteresis thresholds (degrees of roll)
 float rollEnterDeg = 75.0f;
-float rollExitDeg  = 60.0f;
+float rollExitDeg = 60.0f;
 
+RTC_DATA_ATTR PowerMode powerMode = ACTIVE;
+RTC_DATA_ATTR uint64_t maintenanceWakeIntervalUs = 1800000000ULL;  // 30 min
+
+RTC_DATA_ATTR bool bnoHealthy = false;
 // -------------------- FORWARD DECLARATIONS --------------------
 
-void    firstBootSetup();
-bool    ensureWifi();
-void    connectWifi();
-void    disconnectWifi();
-void    syncTime();
-void    fetchConfig();
-void    calibrateAccumulate(float qx, float qy, float qz, float qw);
+void firstBootSetup();
+bool ensureWifi();
+void connectWifi();
+void disconnectWifi();
+void syncTime();
+void fetchConfig();
+void calibrateAccumulate(float qx, float qy, float qz, float qw);
 SensorReadingV2 normalize(const SensorReadingV2& raw);
 Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz);
-bool    sendReading(const SensorReadingV2Dto& dto);
-bool    sendPostureChange(const SensorReadingV2Dto& dto);
-void    sendHeartbeat();
-bool    get(const String& url);
-bool    post(const String& url, const String& body);
-Quat    conjugate(const Quat& q);
-Quat    multiply(const Quat& a, const Quat& b);
-String  isoTimestamp();
-float   readBatteryVoltage();
-int     voltageToPercent(float voltage);
-void    sendDeviceStatus(bool bnoConnected);
-
+Posture detectPostureV3(float nqw, float nqx, float nqy, float nqz);
+bool sendReading(const SensorReadingV2Dto& dto);
+bool sendPostureChange(const SensorReadingV2Dto& dto);
+void sendHeartbeat();
+bool get(const String& url);
+bool post(const String& url, const String& body);
+Quat conjugate(const Quat& q);
+Quat multiply(const Quat& a, const Quat& b);
+String isoTimestamp();
+float readBatteryVoltage();
+int voltageToPercent(float voltage);
+void sendDeviceStatus();
+bool wokeFromDeepSleep();
+void runMaintenanceMode();
 
 // -------------------- SETUP --------------------
 
 void setup() {
   Serial.begin(115200);
   delay(2000);
+
   Serial.println("--- BNO085 Horse Collar Firmware ---");
+
+  esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  bool coldBoot = (cause == ESP_SLEEP_WAKEUP_UNDEFINED);
+  bool wokeFromSleep = (cause == ESP_SLEEP_WAKEUP_TIMER || cause == ESP_SLEEP_WAKEUP_EXT0);
+
+  if (!wokeFromSleep) {
+    consecutiveSendFailures = 0;
+  }
+
+  for (auto& n : WIFI_NETWORKS)
+    wifiMulti.addAP(n.ssid, n.password);
+
+
+  if (coldBoot) {
+    firstBootSetup();
+  }
+
+  if (powerMode == MAINTENANCE) {
+    runMaintenanceMode();
+  }
+
 
   Wire.begin();
   if (!bno08x.begin_I2C()) {
@@ -168,13 +200,6 @@ void setup() {
   esp_sleep_enable_ext0_wakeup((gpio_num_t)BNO_INT_PIN, 0);
   esp_sleep_enable_timer_wakeup(sleepTimerUs);
 
-  for (auto& n : WIFI_NETWORKS)
-    wifiMulti.addAP(n.ssid, n.password);
-
-  if (firstBoot) {
-    firstBootSetup();
-  }
-
   Serial.println("Setup complete. Entering sleep loop...");
   Serial.flush();
 }
@@ -183,13 +208,19 @@ void setup() {
 // -------------------- LOOP --------------------
 
 void loop() {
+  Wire.end();
   // Re-init I2C only when waking from sleep (Wire state may be stale)
   Wire.begin();
   delay(10);
 
   bool gotReading = false;
+  int eventsProcessedThisLoop = 0;  // Track how many frames we drain
   while (bno08x.getSensorEvent(&event)) {
     if (event.sensorId == SH2_ROTATION_VECTOR) {
+      bnoHealthy = true;
+      gotReading = true;
+      eventsProcessedThisLoop++;
+
       currentDto.rawReading.qx = event.un.rotationVector.i;
       currentDto.rawReading.qy = event.un.rotationVector.j;
       currentDto.rawReading.qz = event.un.rotationVector.k;
@@ -208,56 +239,57 @@ void loop() {
                             currentDto.rawReading.qy,
                             currentDto.rawReading.qz,
                             currentDto.rawReading.qw);
+        continue;  // Skip posture checks until calibrated
+      }
+
+      // ---- Build normalized reading ----
+      currentDto.rawReading.readingType = "Raw";
+      currentDto.rawReading.horseId = HORSE_ID;
+
+      currentDto.normalizedReading = normalize(currentDto.rawReading);
+      currentDto.normalizedReading.readingType = "Normalized";
+      currentDto.normalizedReading.horseId = HORSE_ID;
+
+      // ---- Posture detection ----
+      Posture newPosture = detectPostureV3(
+        currentDto.normalizedReading.qw,
+        currentDto.normalizedReading.qx,
+        currentDto.normalizedReading.qy,
+        currentDto.normalizedReading.qz);
+
+      if (newPosture != posture) {
+        posture = newPosture;
+        postureChanged = true;
       }
     }
   }
 
-  // During calibration, sleep and wait for more samples — don't burn CPU.
-  if (!isCalibrated) {
+  if (!isCalibrated || !gotReading) {
     Serial.flush();
     esp_light_sleep_start();
     return;
   }
 
   if (!gotReading) {
+    bnoHealthy = false;
     // No new sensor data this wake cycle — go back to sleep.
     Serial.flush();
     esp_light_sleep_start();
     return;
   }
 
-  // ---- Build normalized reading ----
-  currentDto.rawReading.readingType = "Raw";
-  currentDto.rawReading.horseId     = HORSE_ID;
-
-  currentDto.normalizedReading             = normalize(currentDto.rawReading);
-  currentDto.normalizedReading.readingType = "Normalized";
-  currentDto.normalizedReading.horseId     = HORSE_ID;
-
-  // ---- Posture detection ----
-  Posture newPosture = detectPostureV3(
-    currentDto.normalizedReading.qw,
-    currentDto.normalizedReading.qx,
-    currentDto.normalizedReading.qy,
-    currentDto.normalizedReading.qz);
-
-  if (newPosture != posture) {
-    posture        = newPosture;
-    postureChanged = true;
-  }
-
   // ---- Decide whether to transmit ----
-  uint64_t now           = esp_timer_get_time();
-  bool     needsHeartbeat = (now - lastHeartbeatUs >= heartBeatInterval);
+  uint64_t now = esp_timer_get_time();
+  bool needsHeartbeat = (now - lastHeartbeatUs >= heartBeatInterval);
 
-  readingsSinceLastSend++;
+  readingsSinceLastSend += eventsProcessedThisLoop;
   if (readingsSinceLastSend >= sendEveryN || postureChanged || needsHeartbeat) {
     readingsSinceLastSend = 0;
 
     if (!timeSynced) syncTime();
     String ts = isoTimestamp();
 
-    currentDto.rawReading.timestamp        = ts;
+    currentDto.rawReading.timestamp = ts;
     currentDto.normalizedReading.timestamp = ts;
     currentDto.posture = (posture == LYING ? "lying" : "standing");
 
@@ -288,6 +320,10 @@ void loop() {
     if (needsHeartbeat) {
       lastHeartbeatUs = now;
       sendHeartbeat();
+      fetchConfig();
+      if (powerMode == MAINTENANCE) {
+        ESP.restart();
+      }
     }
 
     disconnectWifi();
@@ -301,7 +337,6 @@ void loop() {
 // -------------------- BOOT --------------------
 
 void firstBootSetup() {
-  firstBoot = false;
   connectWifi();
   syncTime();
   fetchConfig();
@@ -363,7 +398,7 @@ void syncTime() {
 void fetchConfig() {
   String url = String(SERVER_URL) + "/horses/" + HORSE_ID + "/config";
 
-  HTTPClient      http;
+  HTTPClient http;
   WiFiClientSecure secureClient;
   secureClient.setInsecure();
   http.begin(secureClient, url);
@@ -388,11 +423,24 @@ void fetchConfig() {
 
     useTiltForPosture = doc["useTiltForPosture"] | useTiltForPosture;
 
+    String mode = doc["powerMode"] | "active";
+
+    if (mode == "maintenance")
+      powerMode = MAINTENANCE;
+    else
+      powerMode = ACTIVE;
+
+    maintenanceWakeIntervalUs =
+      doc["maintenanceWakeIntervalUs"] | maintenanceWakeIntervalUs;
+
     if (doc["recalibrate"] | false) {
       isCalibrated = false;
-      calCount     = 0;
+      calCount = 0;
       memset(calAccum, 0, sizeof(calAccum));
-      refQx = 0.0f; refQy = 0.0f; refQz = 0.0f; refQw = 1.0f; // ADD THIS
+      refQx = 0.0f;
+      refQy = 0.0f;
+      refQz = 0.0f;
+      refQw = 1.0f;  // ADD THIS
       Serial.println("Remote recalibration triggered");
     }
 
@@ -425,7 +473,7 @@ void calibrateAccumulate(float qx, float qy, float qz, float qw) {
   refQz = calAccum[2] / CAL_SAMPLES;
   refQw = calAccum[3] / CAL_SAMPLES;
 
-  float len = sqrtf(refQx*refQx + refQy*refQy + refQz*refQz + refQw*refQw);
+  float len = sqrtf(refQx * refQx + refQy * refQy + refQz * refQz + refQw * refQw);
   refQx /= len;
   refQy /= len;
   refQz /= len;
@@ -440,9 +488,9 @@ void calibrateAccumulate(float qx, float qy, float qz, float qw) {
 // -------------------- NORMALIZATION --------------------
 
 SensorReadingV2 normalize(const SensorReadingV2& raw) {
-  Quat current   = { raw.qx, raw.qy, raw.qz, raw.qw };
+  Quat current = { raw.qx, raw.qy, raw.qz, raw.qw };
   Quat reference = { refQx, refQy, refQz, refQw };
-  Quat adj       = multiply(conjugate(reference), current);
+  Quat adj = multiply(conjugate(reference), current);
 
   SensorReadingV2 out = raw;
   out.qx = adj.x;
@@ -462,9 +510,9 @@ Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
   //   gz = vertical uprightness
   float gx = 2.0f * (nqx * nqz - nqy * nqw);
   float gy = 2.0f * (nqy * nqz + nqx * nqw);
-  float gz = nqw*nqw - nqx*nqx - nqy*nqy + nqz*nqz;
+  float gz = nqw * nqw - nqx * nqx - nqy * nqy + nqz * nqz;
 
-  float rollDeg  = asinf(constrain(fabsf(gx), 0.0f, 1.0f)) * 180.0f / PI;
+  float rollDeg = asinf(constrain(fabsf(gx), 0.0f, 1.0f)) * 180.0f / PI;
   float pitchDeg = asinf(constrain(fabsf(gy), 0.0f, 1.0f)) * 180.0f / PI;
 
   Serial.printf("ROLL=%+5.1f  PITCH=%+5.1f  gx=%+.3f gy=%+.3f gz=%+.3f  [%s]\n",
@@ -474,7 +522,7 @@ Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
                 posture == LYING ? "LYING" : "STANDING");
 
   const float ENTER_SIN = sinf(rollEnterDeg * PI / 180.0f);  // ~0.966
-  const float EXIT_SIN  = sinf(rollExitDeg  * PI / 180.0f);  // ~0.866
+  const float EXIT_SIN = sinf(rollExitDeg * PI / 180.0f);    // ~0.866
 
   switch (posture) {
     case STANDING:
@@ -497,11 +545,11 @@ Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
 Posture detectPostureV3(float nqw, float nqx, float nqy, float nqz) {
   float gx = 2.0f * (nqx * nqz - nqy * nqw);
   float gy = 2.0f * (nqy * nqz + nqx * nqw);
-  float gz = nqw*nqw - nqx*nqx - nqy*nqy + nqz*nqz;
+  float gz = nqw * nqw - nqx * nqx - nqy * nqy + nqz * nqz;
 
-  float rollDeg  = asinf(constrain(fabsf(gx), 0.0f, 1.0f)) * 180.0f / PI;
+  float rollDeg = asinf(constrain(fabsf(gx), 0.0f, 1.0f)) * 180.0f / PI;
   float pitchDeg = asinf(constrain(fabsf(gy), 0.0f, 1.0f)) * 180.0f / PI;
-  float tiltDeg  = acosf(constrain(gz, -1.0f, 1.0f)) * 180.0f / PI;
+  float tiltDeg = acosf(constrain(gz, -1.0f, 1.0f)) * 180.0f / PI;
 
   Serial.printf("ROLL=%+5.1f  PITCH=%+5.1f  TILT=%+5.1f  gx=%+.3f gy=%+.3f gz=%+.3f  [%s]\n",
                 gx >= 0 ? rollDeg : -rollDeg,
@@ -535,7 +583,7 @@ Posture detectPostureV3(float nqw, float nqx, float nqy, float nqz) {
 bool get(const String& url) {
   if (!ensureWifi()) return false;
 
-  HTTPClient       http;
+  HTTPClient http;
   WiFiClientSecure secureClient;
   if (url.startsWith("https")) {
     secureClient.setInsecure();
@@ -565,7 +613,7 @@ bool post(const String& url, const String& body) {
   Serial.printf("POST %s\n", url.c_str());
   if (!ensureWifi()) return false;
 
-  HTTPClient       http;
+  HTTPClient http;
   WiFiClientSecure secureClient;
   if (url.startsWith("https")) {
     secureClient.setInsecure();
@@ -601,10 +649,10 @@ Quat conjugate(const Quat& q) {
 
 Quat multiply(const Quat& a, const Quat& b) {
   return {
-    a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
-    a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
-    a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
-    a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
+    a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+    a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
   };
 }
 
@@ -634,7 +682,7 @@ float readBatteryVoltage() {
 
 int voltageToPercent(float voltage) {
   if (voltage >= 4.25f) return 100;
-  if (voltage <= 3.4f)  return 0;
+  if (voltage <= 3.4f) return 0;
   return int((voltage - 3.4f) / (4.25f - 3.4f) * 100.0f);
 }
 
@@ -657,17 +705,60 @@ bool sendPostureChange(const SensorReadingV2Dto& dto) {
 // -------------------- HEARTBEAT --------------------
 
 void sendHeartbeat() {
-  sendDeviceStatus(true);
-  fetchConfig();
+  sendDeviceStatus();
 }
 
-void sendDeviceStatus(bool bnoConnected) {
+void sendDeviceStatus() {
   float voltage = readBatteryVoltage();
   JsonDocument doc;
-  doc["timestamp"]      = isoTimestamp();
+  doc["timestamp"] = isoTimestamp();
   doc["batteryVoltage"] = voltage;
   doc["batteryPercent"] = voltageToPercent(voltage);
-  doc["bnoConnected"]   = bnoConnected;
-  String body; serializeJson(doc, body);
+  doc["bnoConnected"] = bnoHealthy;
+  String body;
+  serializeJson(doc, body);
   post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/status", body);
+}
+
+bool wokeFromDeepSleep() {
+  return esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+}
+
+void runMaintenanceMode() {
+  Serial.println("Maintenance mode wakeup");
+  Serial.printf(
+    "Wake cause: %d\n",
+    esp_sleep_get_wakeup_cause());
+
+  connectWifi();
+
+  if (!timeSynced)
+    syncTime();
+
+  sendHeartbeat();
+  fetchConfig();
+
+  disconnectWifi();
+
+  if (powerMode == ACTIVE) {
+    Serial.println("Leaving maintenance mode");
+
+    isCalibrated = false;
+    calCount = 0;
+    memset(calAccum, 0, sizeof(calAccum));
+
+    delay(100);
+    ESP.restart();
+  }
+
+  Serial.printf(
+    "Sleeping for %.1f minutes\n",
+    maintenanceWakeIntervalUs / 60000000.0f);
+
+  Serial.flush();
+
+  esp_sleep_enable_timer_wakeup(
+    maintenanceWakeIntervalUs);
+
+  esp_deep_sleep_start();
 }
