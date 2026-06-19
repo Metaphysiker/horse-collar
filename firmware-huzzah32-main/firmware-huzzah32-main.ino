@@ -464,7 +464,7 @@ void fetchConfig() {
 
       Serial.println("Remote recalibration triggered");
 
-      // ACKNOWLEDGE THE COMMAND: Tell the server we have consumed the request
+      // ADD THIS LINE BELOW TO CALL YOUR NEW .NET ENDPOINT:
       post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/recalibrate/clear", "{}");
     }
 
