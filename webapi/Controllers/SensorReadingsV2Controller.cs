@@ -12,13 +12,23 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
     public async Task<List<SensorReadingV2>> GetByHorse(string horseId, [FromQuery] DateOnly? date, [FromQuery] int? limit)
     {
         var day = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
-        var from = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-        var to = day.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
+
+        var from = DateTime.SpecifyKind(day.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+        var to = DateTime.SpecifyKind(day.ToDateTime(TimeOnly.MaxValue), DateTimeKind.Utc);
+
+        // Explicitly enforce strong typing across properties
+        var filter = Builders<SensorReadingV2>.Filter.And(
+            Builders<SensorReadingV2>.Filter.Eq(r => r.HorseId, horseId),
+            Builders<SensorReadingV2>.Filter.Gte(r => r.Timestamp, from),
+            Builders<SensorReadingV2>.Filter.Lte(r => r.Timestamp, to)
+        );
+
         var find = _readings
-            .Find(r => r.HorseId == horseId && r.Timestamp >= from && r.Timestamp <= to)
+            .Find(filter)
             .SortByDescending(r => r.Timestamp);
+
         var results = await (limit is > 0 ? find.Limit(limit.Value) : find).ToListAsync();
-        results.Reverse();
+        results.Reverse(); // Chronological order
         return results;
     }
 
@@ -40,10 +50,14 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
             var raw = readingDto.rawReading;
             raw.HorseId = horseId;
             raw.ReadingType = raw.ReadingType ?? ReadingType.Raw.ToString();
+
+            var timestampUtc = DateTime.SpecifyKind(raw.Timestamp, DateTimeKind.Utc);
+
+
             await _readings.InsertOneAsync(new SensorReadingV2
             {
                 HorseId = raw.HorseId,
-                Timestamp = raw.Timestamp,
+                Timestamp = timestampUtc,
                 Qw = raw.Qw,
                 Qx = raw.Qx,
                 Qy = raw.Qy,
@@ -59,10 +73,13 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
             var norm = readingDto.normalizedReading;
             norm.HorseId = horseId;
             norm.ReadingType = norm.ReadingType ?? ReadingType.Normalized.ToString();
+
+            var timestampUtc = DateTime.SpecifyKind(norm.Timestamp, DateTimeKind.Utc);
+
             await _readings.InsertOneAsync(new SensorReadingV2
             {
                 HorseId = norm.HorseId,
-                Timestamp = norm.Timestamp,
+                Timestamp = timestampUtc,
                 Qw = norm.Qw,
                 Qx = norm.Qx,
                 Qy = norm.Qy,
@@ -88,10 +105,13 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
             var raw = readingDto.rawReading;
             raw.HorseId = horseId;
             raw.ReadingType = raw.ReadingType ?? ReadingType.Raw.ToString();
+
+            var timestampUtc = DateTime.SpecifyKind(raw.Timestamp, DateTimeKind.Utc);
+
             await _readings.InsertOneAsync(new SensorReadingV2
             {
                 HorseId = raw.HorseId,
-                Timestamp = raw.Timestamp,
+                Timestamp = timestampUtc,
                 Qw = raw.Qw,
                 Qx = raw.Qx,
                 Qy = raw.Qy,
@@ -107,10 +127,13 @@ public class SensorReadingsV2Controller(IMongoDatabase db, HorseService horseSer
             var norm = readingDto.normalizedReading;
             norm.HorseId = horseId;
             norm.ReadingType = norm.ReadingType ?? ReadingType.Normalized.ToString();
+
+            var timestampUtc = DateTime.SpecifyKind(norm.Timestamp, DateTimeKind.Utc);
+
             await _readings.InsertOneAsync(new SensorReadingV2
             {
                 HorseId = norm.HorseId,
-                Timestamp = norm.Timestamp,
+                Timestamp = timestampUtc,
                 Qw = norm.Qw,
                 Qx = norm.Qx,
                 Qy = norm.Qy,
