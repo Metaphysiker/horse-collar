@@ -3,45 +3,32 @@
   import * as THREE from 'three';
   import { formatDate } from '../utils/formatDate.js';
 
-  let { readings = [], config = null } = $props();
+  let { readings = [] } = $props();
 
   let canvas;
   let renderer, animFrame;
   let currentIdx = $state(0);
-  let translated = $state(true);
 
-  function applyBaseline(qw, qx, qy, qz) {
-    const rw =  (config?.refQw ?? 1);
-    const rx = -(config?.refQx ?? 0);
-    const ry = -(config?.refQy ?? 0);
-    const rz = -(config?.refQz ?? 0);
-    return new THREE.Quaternion(
-      rw*qx + rx*qw + ry*qz - rz*qy,
-      rw*qy - rx*qz + ry*qw + rz*qx,
-      rw*qz + rx*qy - ry*qx + rz*qw,
-      rw*qw - rx*qx - ry*qy - rz*qz,
-    );
-  }
+  // At rest (lid flat on the table) the firmware's "normalized" stream
+  // already reports identity — that's the device's own on-board correction
+  // for being screwed into the lid upside down. The "raw" stream doesn't
+  // have that applied: at the same flat position it reads roughly
+  // (w=0.02, x=0.90, y=0.45, z=-0.01), a near-180° flip. MOUNT_FIX is the
+  // inverse of that measured flat reading, so multiplying it onto raw
+  // readings re-zeroes them the same way "normalized" already is.
+  // (Derived from values rounded to 2 decimals — close enough to look
+  // right, but send fuller precision if you want it exact.)
+  const MOUNT_FIX = new THREE.Quaternion(-0.90, -0.45, 0.01, 0.02).normalize();
 
   function quatForReading(r) {
     if (!r || r.qw == null) return new THREE.Quaternion();
-    return applyBaseline(r.qw, r.qx, r.qy, r.qz);
-  }
-
-  function getFrameQ() {
-    if (!config?.axesCalibrated) return new THREE.Quaternion(); // identity — no correction
-    const rollVec  = new THREE.Vector3(config.rollAxisX,  config.rollAxisY,  config.rollAxisZ).normalize();
-    const pitchVec = new THREE.Vector3(config.pitchAxisX, config.pitchAxisY, config.pitchAxisZ).normalize();
-    const yawVec   = new THREE.Vector3().crossVectors(rollVec, pitchVec).normalize();
-    // Rows map sensor axes to display axes: rollVec→Z(spine), pitchVec→X(lateral), yawVec→Y(up)
-    // M×v extracts dot products with each row, so: M×rollVec=(0,0,1), M×pitchVec=(1,0,0), M×yawVec=(0,1,0)
-    const m = new THREE.Matrix4().set(
-      pitchVec.x, pitchVec.y, pitchVec.z, 0,
-      yawVec.x,   yawVec.y,   yawVec.z,   0,
-      rollVec.x,  rollVec.y,  rollVec.z,  0,
-      0, 0, 0, 1
-    );
-    return new THREE.Quaternion().setFromRotationMatrix(m);
+    const raw = new THREE.Quaternion(r.qx, r.qy, r.qz, r.qw);
+    // Only raw readings need the mounting correction — normalized readings
+    // are already corrected upstream by the firmware.
+    if (r.readingType?.toLowerCase() === 'raw') {
+      return raw.multiply(MOUNT_FIX);
+    }
+    return raw;
   }
 
   function buildHorseHead(scene) {
@@ -98,6 +85,9 @@
     neck.rotation.x = 0.25;
     head.add(neck);
 
+    const axes = new THREE.AxesHelper(2);
+    head.add(axes);
+
     scene.add(head);
     return head;
   }
@@ -127,7 +117,10 @@
     grid.position.y = -1.2;
     scene.add(grid);
 
-    const head = buildHorseHead(scene);
+    const world = new THREE.Group();
+    scene.add(world);
+
+    const head = buildHorseHead(world);
     const currentQ = new THREE.Quaternion();
 
     const FRAME_MS = 700;
@@ -146,18 +139,25 @@
         lastAdvance = ts;
       }
 
-      const raw = quatForReading(list[idx]);
-      let target = raw;
-      if (translated) {
-        const frameQ = getFrameQ();
-        target = frameQ.clone().multiply(raw).multiply(frameQ.clone().conjugate());
-      }
+      const target = quatForReading(list[idx]);
       currentQ.slerp(target, 0.12);
-      head.quaternion.copy(currentQ);
+      world.quaternion.copy(currentQ).multiply(SENSOR_TO_WORLD);
       renderer.render(scene, camera);
     }
     requestAnimationFrame(animate);
   });
+
+  const MODEL_FIX = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(
+      0,
+      Math.PI,
+      0
+    )
+  );
+
+  const SENSOR_TO_WORLD = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(Math.PI, 0, Math.PI)
+  );
 
   onDestroy(() => {
     cancelAnimationFrame(animFrame);
@@ -170,13 +170,6 @@
   <div class="info">
     <span class="counter">{currentIdx + 1} / {readings.length}</span>
     <span class="ts">{formatDate(readings[currentIdx]?.timestamp)}</span>
-    <label class="switch-label">
-      <span class:dim={translated}>Raw</span>
-      <button class="switch" class:on={translated} onclick={() => translated = !translated}>
-        <span class="thumb"></span>
-      </button>
-      <span class:dim={!translated}>Translated</span>
-    </label>
   </div>
 {/if}
 
@@ -188,17 +181,4 @@
     font-family: monospace; font-size: 0.78rem;
   }
   .counter { color: #0ea5e9; font-weight: 600; }
-  .switch-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
-  .dim { opacity: 0.4; }
-  .switch {
-    width: 32px; height: 18px; border-radius: 9px; border: none; cursor: pointer;
-    background: #334155; position: relative; padding: 0; transition: background 0.2s;
-  }
-  .switch.on { background: #0ea5e9; }
-  .thumb {
-    position: absolute; top: 3px; left: 3px;
-    width: 12px; height: 12px; border-radius: 50%; background: white;
-    transition: left 0.2s;
-  }
-  .switch.on .thumb { left: 17px; }
 </style>
