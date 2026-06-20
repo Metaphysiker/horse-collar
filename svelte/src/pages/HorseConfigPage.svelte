@@ -77,18 +77,6 @@
         </label>
 
         <label>
-          Send every N readings
-          <span class="hint">Send a Reading after every N cycles</span>
-          <div class="presets">
-            <button type="button" class:active={config.sendEveryN === 5}   onclick={() => config.sendEveryN = 5}>5 — Collection</button>
-            <button type="button" class:active={config.sendEveryN === 20}  onclick={() => config.sendEveryN = 20}>20 — Dense</button>
-            <button type="button" class:active={config.sendEveryN === 60}  onclick={() => config.sendEveryN = 60}>60 — Normal</button>
-            <button type="button" class:active={config.sendEveryN === 200} onclick={() => config.sendEveryN = 200}>200 — Battery</button>
-          </div>
-          <input type="number" min="1" step="1" bind:value={config.sendEveryN} />
-        </label>
-
-        <label>
           Roll Enter Deg
           <span class="hint">Ab wie viel Grad Roll Enter kommt.</span>
           <div class="presets">

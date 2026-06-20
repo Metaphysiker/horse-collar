@@ -88,7 +88,6 @@ WiFiClientSecure secureClient;
 RTC_DATA_ATTR bool isCalibrated = false;
 
 RTC_DATA_ATTR uint64_t lastHeartbeatUs = 0;
-int readingsSinceLastSend = 0;
 RTC_DATA_ATTR int consecutiveSendFailures = 0;
 
 RTC_DATA_ATTR bool timeSynced = false;
@@ -121,7 +120,6 @@ RTC_DATA_ATTR bool useTiltForPosture = false;  // false = V2 roll-only, true = V
 uint32_t reportInterval = 1000000;  // 1 Hz
 uint64_t sleepTimerUs = 1500000ULL;
 uint64_t heartBeatInterval = 60000000ULL;  // One minute in microseconds
-int sendEveryN = 60;
 
 // Hysteresis thresholds (degrees of roll)
 float rollEnterDeg = 75.0f;
@@ -290,10 +288,8 @@ void loop() {
     }
   }
 
-  readingsSinceLastSend += eventsProcessedThisLoop;
-
   // ---- 3. Conditional Transmission Block ----
-  if ((readingsSinceLastSend >= sendEveryN && gotReading) || postureChanged || needsHeartbeat) {
+  if (postureChanged || needsHeartbeat) {
     if (!timeSynced) syncTime();
     String ts = isoTimestamp();
 
@@ -301,13 +297,11 @@ void loop() {
     currentDto.normalizedReading.timestamp = ts;
     currentDto.posture = (posture == LYING ? "lying" : "standing");
 
-    // Establish the connection once for this burst
+    // Open connection once for this burst
     connectWifi();
 
-    // Only send a regular data packet if we actually have fresh readings to send
-    if (readingsSinceLastSend >= sendEveryN && gotReading) {
-      readingsSinceLastSend = 0;
-
+    // Send the latest data payload whenever the heartbeat interval triggers
+    if (needsHeartbeat && gotReading) {
       bool ok = sendReading(currentDto);
       if (ok) {
         consecutiveSendFailures = 0;
@@ -323,7 +317,7 @@ void loop() {
       }
     }
 
-    // Process posture changes immediately if flagged
+    // Process posture changes immediately if flagged (retains instant alerting)
     if (postureChanged) {
       if (sendPostureChange(currentDto)) {
         postureChanged = false;
@@ -332,17 +326,17 @@ void loop() {
       }
     }
 
-    // Fire the heartbeat regardless of sensor state
+    // Fire the diagnostic heartbeat packet and update configurations
     if (needsHeartbeat) {
       lastHeartbeatUs = now;
-      sendHeartbeat();  // Sends diagnostic data containing the accurate bnoHealthy status
+      sendHeartbeat();
       fetchConfig();
       if (powerMode == MAINTENANCE) {
         ESP.restart();
       }
     }
 
-    // Cleanly tear down the shared TLS tunnel and radio
+    // Cleanly tear down network resources
     secureClient.stop();
     disconnectWifi();
   }
@@ -378,9 +372,8 @@ bool ensureWifi() {
 
   unsigned long start = millis();
   while (millis() - start < WIFI_TIMEOUT_MS) {
-    esp_task_wdt_reset();
     if (wifiMulti.run() == WL_CONNECTED) return true;
-    delay(500);
+    delay(500);  // This automatically handles background tasks/watchdogs
   }
   Serial.println("WiFi timeout");
   return false;
@@ -400,13 +393,13 @@ void syncTime() {
   unsigned long start = millis();
   time_t now = 0;
   while (millis() - start < NTP_TIMEOUT_MS) {
-    esp_task_wdt_reset();
+    // REMOVED: esp_task_wdt_reset();
     time(&now);
     if (now > 100000) {
       timeSynced = true;
       return;
     }
-    delay(500);
+    delay(500);  // This automatically handles background tasks/watchdogs
   }
   Serial.println("NTP sync failed");
 }
@@ -436,7 +429,6 @@ void fetchConfig() {
     deserializeJson(doc, http.getString());
 
     targetReportInterval = doc["reportInterval"] | reportInterval;
-    sendEveryN = doc["sendEveryN"] | sendEveryN;
 
     rollEnterDeg = doc["rollEnterDeg"] | rollEnterDeg;
     rollExitDeg = doc["rollExitDeg"] | rollExitDeg;
