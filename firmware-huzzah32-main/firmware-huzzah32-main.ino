@@ -21,7 +21,8 @@
 #define HTTP_TIMEOUT_MS 5000
 #define NTP_TIMEOUT_MS 10000
 #define MAX_SEND_FAILURES 5
-
+#define LOW_BATTERY_ENTER_V  3.55f
+#define LOW_BATTERY_EXIT_V   3.75f
 
 // -------------------- STRUCTS --------------------
 
@@ -88,7 +89,6 @@ WiFiClientSecure secureClient;
 RTC_DATA_ATTR bool isCalibrated = false;
 
 RTC_DATA_ATTR uint64_t lastHeartbeatUs = 0;
-RTC_DATA_ATTR int consecutiveSendFailures = 0;
 
 RTC_DATA_ATTR bool timeSynced = false;
 
@@ -96,7 +96,8 @@ SensorReadingV2Dto currentDto;
 
 enum PowerMode {
   ACTIVE,
-  MAINTENANCE
+  MAINTENANCE,
+  LOW_BATTERY
 };
 
 enum Posture { STANDING,
@@ -169,10 +170,6 @@ void setup() {
   bool coldBoot = (cause == ESP_SLEEP_WAKEUP_UNDEFINED);
   bool wokeFromSleep = (cause == ESP_SLEEP_WAKEUP_TIMER || cause == ESP_SLEEP_WAKEUP_EXT0);
 
-  if (!wokeFromSleep) {
-    consecutiveSendFailures = 0;
-  }
-
   for (auto& n : WIFI_NETWORKS)
     wifiMulti.addAP(n.ssid, n.password);
 
@@ -181,7 +178,7 @@ void setup() {
     firstBootSetup();
   }
 
-  if (powerMode == MAINTENANCE) {
+  if (powerMode == MAINTENANCE || powerMode == LOW_BATTERY) {
     runMaintenanceMode();
   }
 
@@ -302,18 +299,8 @@ void loop() {
 
     // Send the latest data payload whenever the heartbeat interval triggers
     if (needsHeartbeat && gotReading) {
-      bool ok = sendReading(currentDto);
-      if (ok) {
-        consecutiveSendFailures = 0;
-      } else {
-        consecutiveSendFailures++;
-        Serial.printf("Send failed -- consecutive failures: %d\n", consecutiveSendFailures);
-        if (consecutiveSendFailures >= MAX_SEND_FAILURES) {
-          Serial.printf("Too many failures (%d) -- rebooting in 60s\n", consecutiveSendFailures);
-          Serial.flush();
-          delay(60000);
-          ESP.restart();
-        }
+      if (!sendReading(currentDto)) {
+        Serial.println("Send failed — will retry next heartbeat.");
       }
     }
 
@@ -329,6 +316,7 @@ void loop() {
     // Fire the diagnostic heartbeat packet and update configurations
     if (needsHeartbeat) {
       lastHeartbeatUs = now;
+      checkBattery();
       sendHeartbeat();
       fetchConfig();
       if (powerMode == MAINTENANCE) {
@@ -756,29 +744,66 @@ void runMaintenanceMode() {
   Serial.printf("Wake cause: %d\n", esp_sleep_get_wakeup_cause());
 
   connectWifi();
+  if (!timeSynced) syncTime();
 
-  if (!timeSynced)
-    syncTime();
+  // ---- Low-battery recovery check ----
+  if (powerMode == LOW_BATTERY) {
+    float v = readBatteryVoltage();
+    Serial.printf("Low-battery wakeup: %.2fV\n", v);
+    sendDeviceStatus();   // report current voltage to server
+
+    if (v >= LOW_BATTERY_EXIT_V) {
+      Serial.println("Battery recovered — resuming ACTIVE mode");
+      powerMode = ACTIVE;
+      isCalibrated = false;
+      calCount = 0;
+      memset(calAccum, 0, sizeof(calAccum));
+      disconnectWifi();
+      delay(100);
+      ESP.restart();
+    }
+
+    // Still low — go back to sleep
+    Serial.printf("Still low (%.2fV) — sleeping %.1f min\n",
+                  v, maintenanceWakeIntervalUs / 60000000.0f);
+    disconnectWifi();
+    Serial.flush();
+    esp_sleep_enable_timer_wakeup(maintenanceWakeIntervalUs);
+    esp_deep_sleep_start();
+  }
+  // ---- end low-battery block ----
 
   sendHeartbeat();
   fetchConfig();
-
   disconnectWifi();
 
   if (powerMode == ACTIVE) {
     Serial.println("Leaving maintenance mode");
-
     isCalibrated = false;
     calCount = 0;
     memset(calAccum, 0, sizeof(calAccum));
-
     delay(100);
     ESP.restart();
   }
 
   Serial.printf("Sleeping for %.1f minutes\n", maintenanceWakeIntervalUs / 60000000.0f);
   Serial.flush();
-
   esp_sleep_enable_timer_wakeup(maintenanceWakeIntervalUs);
   esp_deep_sleep_start();
+}
+
+// -------------------- BATTERY GUARD --------------------
+
+void checkBattery() {
+  float v = readBatteryVoltage();
+  if (powerMode != LOW_BATTERY && v < LOW_BATTERY_ENTER_V) {
+    Serial.printf("LOW BATTERY: %.2fV — entering low-battery sleep\n", v);
+    powerMode = LOW_BATTERY;
+    // Send one last status so the server knows why we went quiet
+    sendDeviceStatus();
+    secureClient.stop();
+    disconnectWifi();
+    esp_sleep_enable_timer_wakeup(maintenanceWakeIntervalUs);
+    esp_deep_sleep_start();
+  }
 }
