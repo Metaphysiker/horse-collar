@@ -43,6 +43,12 @@ public class CollarConfigController(IMongoDatabase db, NtfyService ntfy) : Contr
     [HttpPost("reboot/clear")]
     public async Task<IActionResult> ClearReboot(string horseId)
     {
+        await ntfy.NotifyAsync(
+            horseId,
+            AlarmState.None,
+            "Reboot Clear"
+        );
+
         var update = Builders<CollarConfig>.Update.Set(c => c.Reboot, false);
         await _configs.UpdateOneAsync(c => c.HorseId == horseId, update);
         return NoContent();
@@ -51,6 +57,12 @@ public class CollarConfigController(IMongoDatabase db, NtfyService ntfy) : Contr
     [HttpPost("recalibrate/clear")]
     public async Task<IActionResult> ClearRecalibrate(string horseId)
     {
+        await ntfy.NotifyAsync(
+            horseId,
+            AlarmState.None,
+            "Recalibrate Clear"
+        );
+
         var update = Builders<CollarConfig>.Update.Set(c => c.Recalibrate, false);
         await _configs.UpdateOneAsync(c => c.HorseId == horseId, update);
         return NoContent();
