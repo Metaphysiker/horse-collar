@@ -113,6 +113,10 @@ const int CAL_SAMPLES = 10;
 int consecutiveMissedReadings = 0;
 const int MISSED_READING_THRESHOLD = 3;  // Trigger failure after ~4.5 seconds of silence
 
+RTC_DATA_ATTR float weightGx = 1.0f;  // Default: Use GX for roll calculation
+RTC_DATA_ATTR float weightGy = 0.0f;  // Pitch bleeding into roll
+RTC_DATA_ATTR float weightGz = 0.0f;  // Yaw/Tilt bleeding into roll
+
 // -------------------- CONFIG --------------------
 
 RTC_DATA_ATTR float refQx = 0.0f, refQy = 0.0f, refQz = 0.0f, refQw = 1.0f;
@@ -142,6 +146,7 @@ void calibrateAccumulate(float qx, float qy, float qz, float qw);
 SensorReadingV2 normalize(const SensorReadingV2& raw);
 Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz);
 Posture detectPostureV3(float nqw, float nqx, float nqy, float nqz);
+Posture detectPostureV4(float nqw, float nqx, float nqy, float nqz);
 bool sendReading(const SensorReadingV2Dto& dto);
 bool sendPostureChange(const SensorReadingV2Dto& dto);
 void sendHeartbeat();
@@ -251,7 +256,7 @@ void loop() {
       currentDto.normalizedReading.horseId = HORSE_ID;
 
       // ---- Posture detection ----
-      Posture newPosture = detectPostureV3(
+      Posture newPosture = detectPostureV4(
         currentDto.normalizedReading.qw,
         currentDto.normalizedReading.qx,
         currentDto.normalizedReading.qy,
@@ -424,6 +429,10 @@ void fetchConfig() {
     targetSleepTimerUs = doc["sleepTimerUs"] | sleepTimerUs;
     heartBeatInterval = doc["heartBeatInterval"] | heartBeatInterval;
     useTiltForPosture = doc["useTiltForPosture"] | useTiltForPosture;
+
+    weightGx = doc["weightGx"] | weightGx;
+    weightGy = doc["weightGy"] | weightGy;
+    weightGz = doc["weightGz"] | weightGz;
 
     String mode = doc["powerMode"] | "active";
     powerMode = (mode == "maintenance") ? MAINTENANCE : ACTIVE;
@@ -806,4 +815,51 @@ void checkBattery() {
     esp_sleep_enable_timer_wakeup(maintenanceWakeIntervalUs);
     esp_deep_sleep_start();
   }
+}
+
+Posture detectPostureV4(float nqw, float nqx, float nqy, float nqz) {
+  // Extract gravity vector components from the normalized quaternion
+  float gx = 2.0f * (nqx * nqz - nqy * nqw);
+  float gy = 2.0f * (nqy * nqz + nqx * nqw);
+  float gz = nqw * nqw - nqx * nqx - nqy * nqy + nqz * nqz;
+
+  float rollDeg  = asinf(constrain(fabsf(gx), 0.0f, 1.0f)) * 180.0f / PI;
+  float pitchDeg = asinf(constrain(fabsf(gy), 0.0f, 1.0f)) * 180.0f / PI;
+  float tiltDeg  = acosf(constrain(gz, -1.0f, 1.0f)) * 180.0f / PI;
+
+  // Compute a custom dynamic metric based on remote hardware adjustments
+  // By altering weightGx, weightGy, or weightGz, you change what "roll" physically means.
+  float customMetric = (fabsf(gx) * weightGx) + (fabsf(gy) * weightGy) + (fabsf(gz) * weightGz);
+
+  // Convert custom metric component back into an effective degree representation
+  float metricDeg = asinf(constrain(customMetric, 0.0f, 1.0f)) * 180.0f / PI;
+
+  // Fallback override if you still want to explicitly use full Tilt
+  if (useTiltForPosture) {
+    metricDeg = tiltDeg;
+  }
+
+  Serial.printf("ROLL=%+5.1f PITCH=%+5.1f TILT=%+5.1f CUSTOM_METRIC_DEG=%5.1f [%s]\n",
+                gx >= 0 ? rollDeg : -rollDeg,
+                gy >= 0 ? pitchDeg : -pitchDeg,
+                tiltDeg, metricDeg,
+                posture == LYING ? "LYING" : "STANDING");
+
+  // State machine execution using the remote-adjusted metric
+  switch (posture) {
+    case STANDING:
+      if (metricDeg > rollEnterDeg) {
+        Serial.printf("-> LYING (customMetric=%.1f)\n", metricDeg);
+        return LYING;
+      }
+      break;
+
+    case LYING:
+      if (metricDeg < rollExitDeg) {
+        Serial.printf("-> STANDING (customMetric=%.1f)\n", metricDeg);
+        return STANDING;
+      }
+      break;
+  }
+  return posture;
 }
