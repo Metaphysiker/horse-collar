@@ -47,6 +47,17 @@
         <h2>Current Main Settings</h2>
 
         <label>
+          SendEveryN (microseconds)
+          <span class="hint">SendEveryN</span>
+          <div class="presets">
+            <button type="button" class:active={config.sendEveryN === 60}  onclick={() => config.sendEveryN = 60}>60</button>
+            <button type="button" class:active={config.sendEveryN === 120}  onclick={() => config.sendEveryN = 120}>120</button>
+            <button type="button" class:active={config.sendEveryN === 180}  onclick={() => config.sendEveryN = 180}>180</button>
+          </div>
+          <input type="number" min="1" step="1" bind:value={config.sendEveryN} />
+        </label>
+
+        <label>
           ReportInterval (microseconds)
           <span class="hint">Wie oft der BNO-Sensor reportet.</span>
           <div class="presets">
