@@ -16,6 +16,13 @@ public class CollarConfigController(IMongoDatabase db, NtfyService ntfy) : Contr
             config = new CollarConfig { HorseId = horseId };
             await _configs.InsertOneAsync(config);
         }
+
+        await ntfy.NotifyAsync(
+            horseId,
+            AlarmState.None,
+            "Get Config"
+        );
+
         return Ok(config);
     }
 

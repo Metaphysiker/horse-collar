@@ -21,6 +21,7 @@ public class NtfyService(HttpClient http, IConfiguration config)
 
         var (title, message, priority, tag) = alarm switch
         {
+            AlarmState.None => ("", $"{reasonText}", 0, ""),
             AlarmState.Emergency => (
                 "🚨 Emergency: Horse down",
                 $"{reasonText} Check immediately.",
