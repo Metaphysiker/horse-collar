@@ -360,7 +360,7 @@ bool ensureWifi() {
   if (WiFi.getMode() != WIFI_STA) {
     WiFi.mode(WIFI_STA);
   }
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  //WiFi.setTxPower(WIFI_POWER_8_5dBm);
   if (wifiMulti.run() == WL_CONNECTED) return true;
 
   unsigned long start = millis();
