@@ -211,8 +211,9 @@ void setup() {
 
   Wire.begin();
   if (!bno08x.begin_I2C()) {
-    LOG("BNO085 not found! Check wiring.\n");
-    while (1) { delay(10); }
+    LOG("BNO085 not found — deep sleeping 30s\n");
+    LOG_FLUSH();
+    esp_deep_sleep(30000000ULL);  // 30 seconds, almost zero current draw
   }
   LOG("BNO085 found.\n");
 
