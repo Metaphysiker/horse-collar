@@ -17,12 +17,13 @@
 
 #define BNO_INT_PIN 14
 #define BATTERY_PIN A13
-#define WIFI_TIMEOUT_MS 15000
+#define WIFI_TIMEOUT_MS 12000         // Normal operation
+#define WIFI_TIMEOUT_LOW_BAT_MS 6000  // Low-battery wakeups
 #define HTTP_TIMEOUT_MS 5000
 #define NTP_TIMEOUT_MS 10000
 #define MAX_SEND_FAILURES 5
-#define LOW_BATTERY_ENTER_V  3.55f
-#define LOW_BATTERY_EXIT_V   3.75f
+#define LOW_BATTERY_ENTER_V 3.55f
+#define LOW_BATTERY_EXIT_V 3.75f
 
 // -------------------- STRUCTS --------------------
 
@@ -137,7 +138,7 @@ RTC_DATA_ATTR bool bnoHealthy = false;
 // -------------------- FORWARD DECLARATIONS --------------------
 
 void firstBootSetup();
-bool ensureWifi();
+bool ensureWifi(uint32_t timeoutMs = WIFI_TIMEOUT_MS);
 void connectWifi();
 void disconnectWifi();
 void syncTime();
@@ -160,6 +161,7 @@ int voltageToPercent(float voltage);
 void sendDeviceStatus();
 bool wokeFromDeepSleep();
 void runMaintenanceMode();
+void checkBattery();
 
 // -------------------- SETUP --------------------
 
@@ -216,6 +218,8 @@ void setup() {
 void loop() {
   // FIXED: Removed the aggressive Wire.end() and Wire.begin() sequence.
   // The ESP32 retains full configuration and clock gating states during light sleep.
+
+  checkBattery();
 
   bool gotReading = false;
   int eventsProcessedThisLoop = 0;  // Track how many frames we drain
@@ -321,7 +325,6 @@ void loop() {
     // Fire the diagnostic heartbeat packet and update configurations
     if (needsHeartbeat) {
       lastHeartbeatUs = now;
-      checkBattery();
       sendHeartbeat();
       fetchConfig();
       if (powerMode == MAINTENANCE) {
@@ -356,17 +359,14 @@ void connectWifi() {
   ensureWifi();
 }
 
-bool ensureWifi() {
-  if (WiFi.getMode() != WIFI_STA) {
-    WiFi.mode(WIFI_STA);
-  }
-  //WiFi.setTxPower(WIFI_POWER_8_5dBm);
+bool ensureWifi(uint32_t timeoutMs = WIFI_TIMEOUT_MS) {
+  if (WiFi.getMode() != WIFI_STA) WiFi.mode(WIFI_STA);
   if (wifiMulti.run() == WL_CONNECTED) return true;
 
   unsigned long start = millis();
-  while (millis() - start < WIFI_TIMEOUT_MS) {
+  while (millis() - start < timeoutMs) {
     if (wifiMulti.run() == WL_CONNECTED) return true;
-    delay(500);  // This automatically handles background tasks/watchdogs
+    delay(500);
   }
   Serial.println("WiFi timeout");
   return false;
@@ -752,14 +752,19 @@ void runMaintenanceMode() {
   Serial.println("Maintenance mode wakeup");
   Serial.printf("Wake cause: %d\n", esp_sleep_get_wakeup_cause());
 
-  connectWifi();
-  if (!timeSynced) syncTime();
-
-  // ---- Low-battery recovery check ----
+  // ---- Low-battery path ----
   if (powerMode == LOW_BATTERY) {
+    if (!ensureWifi(WIFI_TIMEOUT_LOW_BAT_MS)) {
+      Serial.println("Low-bat: WiFi failed — sleeping immediately");
+      esp_sleep_enable_timer_wakeup(maintenanceWakeIntervalUs);
+      esp_deep_sleep_start();
+    }
+
+    if (!timeSynced) syncTime();
+
     float v = readBatteryVoltage();
     Serial.printf("Low-battery wakeup: %.2fV\n", v);
-    sendDeviceStatus();   // report current voltage to server
+    sendDeviceStatus();
 
     if (v >= LOW_BATTERY_EXIT_V) {
       Serial.println("Battery recovered — resuming ACTIVE mode");
@@ -781,6 +786,10 @@ void runMaintenanceMode() {
     esp_deep_sleep_start();
   }
   // ---- end low-battery block ----
+
+  // ---- Normal maintenance path ----
+  connectWifi();
+  if (!timeSynced) syncTime();
 
   sendHeartbeat();
   fetchConfig();
@@ -823,9 +832,9 @@ Posture detectPostureV4(float nqw, float nqx, float nqy, float nqz) {
   float gy = 2.0f * (nqy * nqz + nqx * nqw);
   float gz = nqw * nqw - nqx * nqx - nqy * nqy + nqz * nqz;
 
-  float rollDeg  = asinf(constrain(fabsf(gx), 0.0f, 1.0f)) * 180.0f / PI;
+  float rollDeg = asinf(constrain(fabsf(gx), 0.0f, 1.0f)) * 180.0f / PI;
   float pitchDeg = asinf(constrain(fabsf(gy), 0.0f, 1.0f)) * 180.0f / PI;
-  float tiltDeg  = acosf(constrain(gz, -1.0f, 1.0f)) * 180.0f / PI;
+  float tiltDeg = acosf(constrain(gz, -1.0f, 1.0f)) * 180.0f / PI;
 
   // Compute a custom dynamic metric based on remote hardware adjustments
   // By altering weightGx, weightGy, or weightGz, you change what "roll" physically means.
