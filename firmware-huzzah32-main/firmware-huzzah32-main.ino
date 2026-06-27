@@ -21,9 +21,31 @@
 #define WIFI_TIMEOUT_LOW_BAT_MS 6000  // Low-battery wakeups
 #define HTTP_TIMEOUT_MS 5000
 #define NTP_TIMEOUT_MS 10000
-#define MAX_SEND_FAILURES 5
 #define LOW_BATTERY_ENTER_V 3.55f
 #define LOW_BATTERY_EXIT_V 3.75f
+
+#define DEBUG_SERIAL 0  // Set to 1 for debug builds
+
+#if DEBUG_SERIAL
+#define LOG(fmt, ...) Serial.printf(fmt, ##__VA_ARGS__)
+#define LOG_BEGIN() \
+  do { \
+    Serial.begin(115200); \
+    delay(2000); \
+  } while (0)
+#define LOG_FLUSH() Serial.flush()
+#else
+#define LOG(fmt, ...) \
+  do { \
+  } while (0)
+#define LOG_BEGIN() \
+  do { \
+  } while (0)
+#define LOG_FLUSH() \
+  do { \
+  } while (0)
+#endif
+
 
 // -------------------- STRUCTS --------------------
 
@@ -112,29 +134,31 @@ RTC_DATA_ATTR static int calCount = 0;
 const int CAL_SAMPLES = 10;
 
 int consecutiveMissedReadings = 0;
-const int MISSED_READING_THRESHOLD = 3;  // Trigger failure after ~4.5 seconds of silence
+const int MISSED_READING_THRESHOLD = 3;
 
-RTC_DATA_ATTR float weightGx = 1.0f;  // Default: Use GX for roll calculation
-RTC_DATA_ATTR float weightGy = 0.0f;  // Pitch bleeding into roll
-RTC_DATA_ATTR float weightGz = 0.0f;  // Yaw/Tilt bleeding into roll
+RTC_DATA_ATTR float weightGx = 1.0f;
+RTC_DATA_ATTR float weightGy = 0.0f;
+RTC_DATA_ATTR float weightGz = 0.0f;
+
 
 // -------------------- CONFIG --------------------
 
 RTC_DATA_ATTR float refQx = 0.0f, refQy = 0.0f, refQz = 0.0f, refQw = 1.0f;
-RTC_DATA_ATTR bool useTiltForPosture = false;  // false = V2 roll-only, true = V3 tilt
+RTC_DATA_ATTR bool useTiltForPosture = false;
 
-uint32_t reportInterval = 1000000;  // 1 Hz
+uint32_t reportInterval = 1000000;
 uint64_t sleepTimerUs = 1500000ULL;
-uint64_t heartBeatInterval = 60000000ULL;  // One minute in microseconds
+uint64_t heartBeatInterval = 60000000ULL;
 
-// Hysteresis thresholds (degrees of roll)
 float rollEnterDeg = 75.0f;
 float rollExitDeg = 60.0f;
 
 RTC_DATA_ATTR PowerMode powerMode = ACTIVE;
-RTC_DATA_ATTR uint64_t maintenanceWakeIntervalUs = 1800000000ULL;  // 30 min
+RTC_DATA_ATTR uint64_t maintenanceWakeIntervalUs = 1800000000ULL;
 
 RTC_DATA_ATTR bool bnoHealthy = false;
+
+
 // -------------------- FORWARD DECLARATIONS --------------------
 
 void firstBootSetup();
@@ -150,7 +174,6 @@ Posture detectPostureV3(float nqw, float nqx, float nqy, float nqz);
 Posture detectPostureV4(float nqw, float nqx, float nqy, float nqz);
 bool sendReading(const SensorReadingV2Dto& dto);
 bool sendPostureChange(const SensorReadingV2Dto& dto);
-void sendHeartbeat();
 bool get(const String& url);
 bool post(const String& url, const String& body);
 Quat conjugate(const Quat& q);
@@ -159,27 +182,24 @@ String isoTimestamp();
 float readBatteryVoltage();
 int voltageToPercent(float voltage);
 void sendDeviceStatus();
-bool wokeFromDeepSleep();
 void runMaintenanceMode();
 void checkBattery();
+
 
 // -------------------- SETUP --------------------
 
 void setup() {
-  Serial.begin(115200);
-  delay(2000);
+  LOG_BEGIN();
 
-  Serial.println("--- BNO085 Horse Collar Firmware ---");
+  LOG("--- BNO085 Horse Collar Firmware ---\n");
 
   secureClient.setInsecure();
 
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
   bool coldBoot = (cause == ESP_SLEEP_WAKEUP_UNDEFINED);
-  bool wokeFromSleep = (cause == ESP_SLEEP_WAKEUP_TIMER || cause == ESP_SLEEP_WAKEUP_EXT0);
 
   for (auto& n : WIFI_NETWORKS)
     wifiMulti.addAP(n.ssid, n.password);
-
 
   if (coldBoot) {
     firstBootSetup();
@@ -189,69 +209,62 @@ void setup() {
     runMaintenanceMode();
   }
 
-
   Wire.begin();
   if (!bno08x.begin_I2C()) {
-    Serial.println("BNO085 not found! Check wiring.");
+    LOG("BNO085 not found! Check wiring.\n");
     while (1) { delay(10); }
   }
-  Serial.println("BNO085 found.");
+  LOG("BNO085 found.\n");
 
   if (!bno08x.enableReport(SH2_ROTATION_VECTOR, reportInterval)) {
-    Serial.println("Failed to enable Rotation Vector!");
+    LOG("Failed to enable Rotation Vector!\n");
   } else {
-    Serial.println("Rotation Vector enabled at 1 Hz.");
+    LOG("Rotation Vector enabled at 1 Hz.\n");
   }
 
-  // GPIO14 wakeup as fallback; primary wakeup is the 500 ms timer below
   pinMode(BNO_INT_PIN, INPUT_PULLUP);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)BNO_INT_PIN, 0);
   esp_sleep_enable_timer_wakeup(sleepTimerUs);
 
-  Serial.println("Setup complete. Entering sleep loop...");
-  Serial.flush();
+  LOG("Setup complete. Entering sleep loop...\n");
+  LOG_FLUSH();
 }
 
 
 // -------------------- LOOP --------------------
 
 void loop() {
-  // FIXED: Removed the aggressive Wire.end() and Wire.begin() sequence.
-  // The ESP32 retains full configuration and clock gating states during light sleep.
-
   checkBattery();
 
   bool gotReading = false;
-  int eventsProcessedThisLoop = 0;  // Track how many frames we drain
+  int eventsProcessedThisLoop = 0;
   while (bno08x.getSensorEvent(&event)) {
     if (event.sensorId == SH2_ROTATION_VECTOR) {
       bnoHealthy = true;
       gotReading = true;
-      consecutiveMissedReadings = 0;  // Clear the counter whenever data arrives
+      consecutiveMissedReadings = 0;
       eventsProcessedThisLoop++;
 
       currentDto.rawReading.qx = event.un.rotationVector.i;
       currentDto.rawReading.qy = event.un.rotationVector.j;
       currentDto.rawReading.qz = event.un.rotationVector.k;
       currentDto.rawReading.qw = event.un.rotationVector.real;
-      gotReading = true;
 
-      Serial.printf("Quat: i=%+.3f j=%+.3f k=%+.3f real=%+.3f\n",
-                    currentDto.rawReading.qx,
-                    currentDto.rawReading.qy,
-                    currentDto.rawReading.qz,
-                    currentDto.rawReading.qw);
+      LOG("Quat: i=%+.3f j=%+.3f k=%+.3f real=%+.3f\n",
+          currentDto.rawReading.qx,
+          currentDto.rawReading.qy,
+          currentDto.rawReading.qz,
+          currentDto.rawReading.qw);
 
       if (!isCalibrated) {
-        Serial.printf("Cal sample %d / %d\n", calCount + 1, CAL_SAMPLES);
+        LOG("Cal sample %d / %d\n", calCount + 1, CAL_SAMPLES);
         calibrateAccumulate(currentDto.rawReading.qx,
                             currentDto.rawReading.qy,
                             currentDto.rawReading.qz,
                             currentDto.rawReading.qw);
-        continue;  // Skip posture checks until calibrated
+        continue;
       }
 
-      // ---- Build normalized reading ----
       currentDto.rawReading.readingType = "Raw";
       currentDto.rawReading.horseId = HORSE_ID;
 
@@ -259,7 +272,6 @@ void loop() {
       currentDto.normalizedReading.readingType = "Normalized";
       currentDto.normalizedReading.horseId = HORSE_ID;
 
-      // ---- Posture detection ----
       Posture newPosture = detectPostureV4(
         currentDto.normalizedReading.qw,
         currentDto.normalizedReading.qx,
@@ -273,20 +285,15 @@ void loop() {
     }
   }
 
-  // ---- 1. Safe Calibration Guard ----
-  // Only exit early if the device is still in its initial calibration phase
   if (!isCalibrated) {
-    Serial.flush();
+    LOG_FLUSH();
     esp_light_sleep_start();
     return;
   }
 
-  // ---- 2. Evaluate Timers ----
   uint64_t now = esp_timer_get_time();
   bool needsHeartbeat = (now - lastHeartbeatUs >= heartBeatInterval);
 
-  // CRITICAL SAFETY FIX: If a heartbeat is due but we didn't pull data,
-  // the sensor has likely failed. Flag it so the server knows!
   if (!gotReading) {
     consecutiveMissedReadings++;
     if (consecutiveMissedReadings >= MISSED_READING_THRESHOLD) {
@@ -294,7 +301,6 @@ void loop() {
     }
   }
 
-  // ---- 3. Conditional Transmission Block ----
   if (postureChanged || needsHeartbeat) {
     if (!timeSynced) syncTime();
     String ts = isoTimestamp();
@@ -303,42 +309,36 @@ void loop() {
     currentDto.normalizedReading.timestamp = ts;
     currentDto.posture = (posture == LYING ? "lying" : "standing");
 
-    // Open connection once for this burst
     connectWifi();
 
-    // Send the latest data payload whenever the heartbeat interval triggers
     if (needsHeartbeat && gotReading) {
       if (!sendReading(currentDto)) {
-        Serial.println("Send failed — will retry next heartbeat.");
+        LOG("Send failed — will retry next heartbeat.\n");
       }
     }
 
-    // Process posture changes immediately if flagged (retains instant alerting)
     if (postureChanged) {
       if (sendPostureChange(currentDto)) {
         postureChanged = false;
       } else {
-        Serial.println("Posture change send failed -- will retry next cycle");
+        LOG("Posture change send failed -- will retry next cycle\n");
       }
     }
 
-    // Fire the diagnostic heartbeat packet and update configurations
     if (needsHeartbeat) {
       lastHeartbeatUs = now;
-      sendHeartbeat();
+      sendDeviceStatus();
       fetchConfig();
       if (powerMode == MAINTENANCE) {
         ESP.restart();
       }
     }
 
-    // Cleanly tear down network resources
     secureClient.stop();
     disconnectWifi();
   }
 
-  // Return to light sleep waiting for the next 1.5s timer or hardware interrupt
-  Serial.flush();
+  LOG_FLUSH();
   esp_light_sleep_start();
 }
 
@@ -359,7 +359,7 @@ void connectWifi() {
   ensureWifi();
 }
 
-bool ensureWifi(uint32_t timeoutMs = WIFI_TIMEOUT_MS) {
+bool ensureWifi(uint32_t timeoutMs) {
   if (WiFi.getMode() != WIFI_STA) WiFi.mode(WIFI_STA);
   if (wifiMulti.run() == WL_CONNECTED) return true;
 
@@ -368,7 +368,7 @@ bool ensureWifi(uint32_t timeoutMs = WIFI_TIMEOUT_MS) {
     if (wifiMulti.run() == WL_CONNECTED) return true;
     delay(500);
   }
-  Serial.println("WiFi timeout");
+  LOG("WiFi timeout\n");
   return false;
 }
 
@@ -386,15 +386,14 @@ void syncTime() {
   unsigned long start = millis();
   time_t now = 0;
   while (millis() - start < NTP_TIMEOUT_MS) {
-    // REMOVED: esp_task_wdt_reset();
     time(&now);
     if (now > 100000) {
       timeSynced = true;
       return;
     }
-    delay(500);  // This automatically handles background tasks/watchdogs
+    delay(500);
   }
-  Serial.println("NTP sync failed");
+  LOG("NTP sync failed\n");
 }
 
 
@@ -408,7 +407,6 @@ void fetchConfig() {
   http.begin(secureClient, url);
   http.setTimeout(HTTP_TIMEOUT_MS);
 
-  // Local tracking flags to defer operations
   bool triggerRecalibrate = false;
   bool triggerReboot = false;
   bool bnoIntervalChanged = false;
@@ -456,29 +454,28 @@ void fetchConfig() {
     refQy = 0.0f;
     refQz = 0.0f;
     refQw = 1.0f;
-
-    Serial.println("Remote recalibration triggered");
+    LOG("Remote recalibration triggered\n");
     post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/recalibrate/clear", "{}");
   }
 
   if (triggerReboot) {
     post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/config/reboot/clear", "{}");
-    Serial.println("Remote reboot triggered");
+    LOG("Remote reboot triggered\n");
     delay(500);
     ESP.restart();
   }
 
   if (bnoIntervalChanged) {
     reportInterval = targetReportInterval;
-    Serial.printf("Hardware Update: Changing BNO report interval to %u us\n", reportInterval);
+    LOG("Hardware Update: Changing BNO report interval to %u us\n", reportInterval);
     if (!bno08x.enableReport(SH2_ROTATION_VECTOR, reportInterval)) {
-      Serial.println("Failed to update BNO report interval!");
+      LOG("Failed to update BNO report interval!\n");
     }
   }
 
   if (sleepTimerChanged) {
     sleepTimerUs = targetSleepTimerUs;
-    Serial.printf("Hardware Update: Changing ESP sleep timer to %llu us\n", sleepTimerUs);
+    LOG("Hardware Update: Changing ESP sleep timer to %llu us\n", sleepTimerUs);
     esp_sleep_enable_timer_wakeup(sleepTimerUs);
   }
 }
@@ -507,8 +504,7 @@ void calibrateAccumulate(float qx, float qy, float qz, float qw) {
   refQw /= len;
 
   isCalibrated = true;
-  Serial.printf("Calibrated. ref=(%.3f, %.3f, %.3f, %.3f)\n",
-                refQx, refQy, refQz, refQw);
+  LOG("Calibrated. ref=(%.3f, %.3f, %.3f, %.3f)\n", refQx, refQy, refQz, refQw);
 }
 
 
@@ -538,11 +534,11 @@ Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
   float rollDeg = asinf(constrain(fabsf(gx), 0.0f, 1.0f)) * 180.0f / PI;
   float pitchDeg = asinf(constrain(fabsf(gy), 0.0f, 1.0f)) * 180.0f / PI;
 
-  Serial.printf("ROLL=%+5.1f  PITCH=%+5.1f  gx=%+.3f gy=%+.3f gz=%+.3f  [%s]\n",
-                gx >= 0 ? rollDeg : -rollDeg,
-                gy >= 0 ? pitchDeg : -pitchDeg,
-                gx, gy, gz,
-                posture == LYING ? "LYING" : "STANDING");
+  LOG("ROLL=%+5.1f  PITCH=%+5.1f  gx=%+.3f gy=%+.3f gz=%+.3f  [%s]\n",
+      gx >= 0 ? rollDeg : -rollDeg,
+      gy >= 0 ? pitchDeg : -pitchDeg,
+      gx, gy, gz,
+      posture == LYING ? "LYING" : "STANDING");
 
   const float ENTER_SIN = sinf(rollEnterDeg * PI / 180.0f);
   const float EXIT_SIN = sinf(rollExitDeg * PI / 180.0f);
@@ -550,14 +546,13 @@ Posture detectPostureV2(float nqw, float nqx, float nqy, float nqz) {
   switch (posture) {
     case STANDING:
       if (fabsf(gx) > ENTER_SIN) {
-        Serial.printf("-> LYING (roll %+.3f)\n", gx);
+        LOG("-> LYING (roll %+.3f)\n", gx);
         return LYING;
       }
       break;
-
     case LYING:
       if (fabsf(gx) < EXIT_SIN) {
-        Serial.printf("-> STANDING (roll %+.3f)\n", gx);
+        LOG("-> STANDING (roll %+.3f)\n", gx);
         return STANDING;
       }
       break;
@@ -574,25 +569,24 @@ Posture detectPostureV3(float nqw, float nqx, float nqy, float nqz) {
   float pitchDeg = asinf(constrain(fabsf(gy), 0.0f, 1.0f)) * 180.0f / PI;
   float tiltDeg = acosf(constrain(gz, -1.0f, 1.0f)) * 180.0f / PI;
 
-  Serial.printf("ROLL=%+5.1f  PITCH=%+5.1f  TILT=%+5.1f  gx=%+.3f gy=%+.3f gz=%+.3f  [%s]\n",
-                gx >= 0 ? rollDeg : -rollDeg,
-                gy >= 0 ? pitchDeg : -pitchDeg,
-                tiltDeg, gx, gy, gz,
-                posture == LYING ? "LYING" : "STANDING");
+  LOG("ROLL=%+5.1f  PITCH=%+5.1f  TILT=%+5.1f  gx=%+.3f gy=%+.3f gz=%+.3f  [%s]\n",
+      gx >= 0 ? rollDeg : -rollDeg,
+      gy >= 0 ? pitchDeg : -pitchDeg,
+      tiltDeg, gx, gy, gz,
+      posture == LYING ? "LYING" : "STANDING");
 
   float metric = useTiltForPosture ? tiltDeg : rollDeg;
 
   switch (posture) {
     case STANDING:
       if (metric > rollEnterDeg) {
-        Serial.printf("-> LYING (%s=%.1f)\n", useTiltForPosture ? "tilt" : "roll", metric);
+        LOG("-> LYING (%s=%.1f)\n", useTiltForPosture ? "tilt" : "roll", metric);
         return LYING;
       }
       break;
-
     case LYING:
       if (metric < rollExitDeg) {
-        Serial.printf("-> STANDING (%s=%.1f)\n", useTiltForPosture ? "tilt" : "roll", metric);
+        LOG("-> STANDING (%s=%.1f)\n", useTiltForPosture ? "tilt" : "roll", metric);
         return STANDING;
       }
       break;
@@ -617,14 +611,14 @@ bool get(const String& url) {
   http.setTimeout(HTTP_TIMEOUT_MS);
 
   int code = http.GET();
-  Serial.printf("GET %s -> %d\n", url.c_str(), code);
+  LOG("GET %s -> %d\n", url.c_str(), code);
   if (code < 0) {
-    Serial.println("GET failed: " + http.errorToString(code));
+    LOG("GET failed: %s\n", http.errorToString(code).c_str());
     http.end();
     return false;
   }
   if (code < 200 || code >= 300) {
-    Serial.println("GET non-2xx: " + http.getString());
+    LOG("GET non-2xx: %s\n", http.getString().c_str());
     http.end();
     return false;
   }
@@ -633,7 +627,7 @@ bool get(const String& url) {
 }
 
 bool post(const String& url, const String& body) {
-  Serial.printf("POST %s\n", url.c_str());
+  LOG("POST %s\n", url.c_str());
   if (!ensureWifi()) return false;
 
   HTTPClient http;
@@ -648,14 +642,14 @@ bool post(const String& url, const String& body) {
   http.addHeader("Content-Type", "application/json");
 
   int code = http.POST(body);
-  Serial.printf("POST -> %d\n", code);
+  LOG("POST -> %d\n", code);
   if (code < 0) {
-    Serial.println("POST failed: " + http.errorToString(code));
+    LOG("POST failed: %s\n", http.errorToString(code).c_str());
     http.end();
     return false;
   }
   if (code < 200 || code >= 300) {
-    Serial.println("POST non-2xx: " + http.getString());
+    LOG("POST non-2xx: %s\n", http.getString().c_str());
     http.end();
     return false;
   }
@@ -684,7 +678,7 @@ Quat multiply(const Quat& a, const Quat& b) {
 
 String isoTimestamp() {
   if (!timeSynced) {
-    Serial.println("WARNING: timestamp not synced");
+    LOG("WARNING: timestamp not synced\n");
     return "1970-01-01T00:00:00Z";
   }
   time_t now;
@@ -725,13 +719,6 @@ bool sendPostureChange(const SensorReadingV2Dto& dto) {
   return post(url, dto.toJson());
 }
 
-
-// -------------------- HEARTBEAT --------------------
-
-void sendHeartbeat() {
-  sendDeviceStatus();
-}
-
 void sendDeviceStatus() {
   float voltage = readBatteryVoltage();
   JsonDocument doc;
@@ -744,18 +731,14 @@ void sendDeviceStatus() {
   post(String(SERVER_URL) + "/horses/" + HORSE_ID + "/status", body);
 }
 
-bool wokeFromDeepSleep() {
-  return esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
-}
-
 void runMaintenanceMode() {
-  Serial.println("Maintenance mode wakeup");
-  Serial.printf("Wake cause: %d\n", esp_sleep_get_wakeup_cause());
+  LOG("Maintenance mode wakeup\n");
+  LOG("Wake cause: %d\n", esp_sleep_get_wakeup_cause());
 
   // ---- Low-battery path ----
   if (powerMode == LOW_BATTERY) {
     if (!ensureWifi(WIFI_TIMEOUT_LOW_BAT_MS)) {
-      Serial.println("Low-bat: WiFi failed — sleeping immediately");
+      LOG("Low-bat: WiFi failed — sleeping immediately\n");
       esp_sleep_enable_timer_wakeup(maintenanceWakeIntervalUs);
       esp_deep_sleep_start();
     }
@@ -763,11 +746,11 @@ void runMaintenanceMode() {
     if (!timeSynced) syncTime();
 
     float v = readBatteryVoltage();
-    Serial.printf("Low-battery wakeup: %.2fV\n", v);
+    LOG("Low-battery wakeup: %.2fV\n", v);
     sendDeviceStatus();
 
     if (v >= LOW_BATTERY_EXIT_V) {
-      Serial.println("Battery recovered — resuming ACTIVE mode");
+      LOG("Battery recovered — resuming ACTIVE mode\n");
       powerMode = ACTIVE;
       isCalibrated = false;
       calCount = 0;
@@ -777,11 +760,9 @@ void runMaintenanceMode() {
       ESP.restart();
     }
 
-    // Still low — go back to sleep
-    Serial.printf("Still low (%.2fV) — sleeping %.1f min\n",
-                  v, maintenanceWakeIntervalUs / 60000000.0f);
+    LOG("Still low (%.2fV) — sleeping %.1f min\n", v, maintenanceWakeIntervalUs / 60000000.0f);
     disconnectWifi();
-    Serial.flush();
+    LOG_FLUSH();
     esp_sleep_enable_timer_wakeup(maintenanceWakeIntervalUs);
     esp_deep_sleep_start();
   }
@@ -791,12 +772,12 @@ void runMaintenanceMode() {
   connectWifi();
   if (!timeSynced) syncTime();
 
-  sendHeartbeat();
+  sendDeviceStatus();
   fetchConfig();
   disconnectWifi();
 
   if (powerMode == ACTIVE) {
-    Serial.println("Leaving maintenance mode");
+    LOG("Leaving maintenance mode\n");
     isCalibrated = false;
     calCount = 0;
     memset(calAccum, 0, sizeof(calAccum));
@@ -804,20 +785,20 @@ void runMaintenanceMode() {
     ESP.restart();
   }
 
-  Serial.printf("Sleeping for %.1f minutes\n", maintenanceWakeIntervalUs / 60000000.0f);
-  Serial.flush();
+  LOG("Sleeping for %.1f minutes\n", maintenanceWakeIntervalUs / 60000000.0f);
+  LOG_FLUSH();
   esp_sleep_enable_timer_wakeup(maintenanceWakeIntervalUs);
   esp_deep_sleep_start();
 }
+
 
 // -------------------- BATTERY GUARD --------------------
 
 void checkBattery() {
   float v = readBatteryVoltage();
   if (powerMode != LOW_BATTERY && v < LOW_BATTERY_ENTER_V) {
-    Serial.printf("LOW BATTERY: %.2fV — entering low-battery sleep\n", v);
+    LOG("LOW BATTERY: %.2fV — entering low-battery sleep\n", v);
     powerMode = LOW_BATTERY;
-    // Send one last status so the server knows why we went quiet
     sendDeviceStatus();
     secureClient.stop();
     disconnectWifi();
@@ -826,8 +807,10 @@ void checkBattery() {
   }
 }
 
+
+// -------------------- POSTURE DETECTION V4 --------------------
+
 Posture detectPostureV4(float nqw, float nqx, float nqy, float nqz) {
-  // Extract gravity vector components from the normalized quaternion
   float gx = 2.0f * (nqx * nqz - nqy * nqw);
   float gy = 2.0f * (nqy * nqz + nqx * nqw);
   float gz = nqw * nqw - nqx * nqx - nqy * nqy + nqz * nqz;
@@ -836,36 +819,29 @@ Posture detectPostureV4(float nqw, float nqx, float nqy, float nqz) {
   float pitchDeg = asinf(constrain(fabsf(gy), 0.0f, 1.0f)) * 180.0f / PI;
   float tiltDeg = acosf(constrain(gz, -1.0f, 1.0f)) * 180.0f / PI;
 
-  // Compute a custom dynamic metric based on remote hardware adjustments
-  // By altering weightGx, weightGy, or weightGz, you change what "roll" physically means.
   float customMetric = (fabsf(gx) * weightGx) + (fabsf(gy) * weightGy) + (fabsf(gz) * weightGz);
-
-  // Convert custom metric component back into an effective degree representation
   float metricDeg = asinf(constrain(customMetric, 0.0f, 1.0f)) * 180.0f / PI;
 
-  // Fallback override if you still want to explicitly use full Tilt
   if (useTiltForPosture) {
     metricDeg = tiltDeg;
   }
 
-  Serial.printf("ROLL=%+5.1f PITCH=%+5.1f TILT=%+5.1f CUSTOM_METRIC_DEG=%5.1f [%s]\n",
-                gx >= 0 ? rollDeg : -rollDeg,
-                gy >= 0 ? pitchDeg : -pitchDeg,
-                tiltDeg, metricDeg,
-                posture == LYING ? "LYING" : "STANDING");
+  LOG("ROLL=%+5.1f PITCH=%+5.1f TILT=%+5.1f CUSTOM_METRIC_DEG=%5.1f [%s]\n",
+      gx >= 0 ? rollDeg : -rollDeg,
+      gy >= 0 ? pitchDeg : -pitchDeg,
+      tiltDeg, metricDeg,
+      posture == LYING ? "LYING" : "STANDING");
 
-  // State machine execution using the remote-adjusted metric
   switch (posture) {
     case STANDING:
       if (metricDeg > rollEnterDeg) {
-        Serial.printf("-> LYING (customMetric=%.1f)\n", metricDeg);
+        LOG("-> LYING (customMetric=%.1f)\n", metricDeg);
         return LYING;
       }
       break;
-
     case LYING:
       if (metricDeg < rollExitDeg) {
-        Serial.printf("-> STANDING (customMetric=%.1f)\n", metricDeg);
+        LOG("-> STANDING (customMetric=%.1f)\n", metricDeg);
         return STANDING;
       }
       break;
