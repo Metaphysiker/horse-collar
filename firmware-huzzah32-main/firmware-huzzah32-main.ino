@@ -23,6 +23,8 @@
 #define NTP_TIMEOUT_MS 10000
 #define LOW_BATTERY_ENTER_V 3.55f
 #define LOW_BATTERY_EXIT_V 3.75f
+#define TIME_RESYNC_INTERVAL_US 3600000000ULL  // 1 hour
+
 
 #define DEBUG_SERIAL 0  // Set to 1 for debug builds
 
@@ -133,25 +135,26 @@ RTC_DATA_ATTR static float calAccum[4] = { 0, 0, 0, 0 };
 RTC_DATA_ATTR static int calCount = 0;
 const int CAL_SAMPLES = 10;
 
-int consecutiveMissedReadings = 0;
+RTC_DATA_ATTR int consecutiveMissedReadings = 0;
 const int MISSED_READING_THRESHOLD = 3;
 
 RTC_DATA_ATTR float weightGx = 1.0f;
 RTC_DATA_ATTR float weightGy = 0.0f;
 RTC_DATA_ATTR float weightGz = 0.0f;
 
+RTC_DATA_ATTR uint64_t lastTimeSyncUs = 0;
 
 // -------------------- CONFIG --------------------
 
 RTC_DATA_ATTR float refQx = 0.0f, refQy = 0.0f, refQz = 0.0f, refQw = 1.0f;
 RTC_DATA_ATTR bool useTiltForPosture = false;
 
-uint32_t reportInterval = 1000000;
-uint64_t sleepTimerUs = 1500000ULL;
-uint64_t heartBeatInterval = 60000000ULL;
+RTC_DATA_ATTR uint32_t reportInterval = 1000000;
+RTC_DATA_ATTR uint64_t sleepTimerUs = 1500000ULL;
+RTC_DATA_ATTR uint64_t heartBeatInterval = 60000000ULL;
 
-float rollEnterDeg = 75.0f;
-float rollExitDeg = 60.0f;
+RTC_DATA_ATTR float rollEnterDeg = 75.0f;
+RTC_DATA_ATTR float rollExitDeg = 60.0f;
 
 RTC_DATA_ATTR PowerMode powerMode = ACTIVE;
 RTC_DATA_ATTR uint64_t maintenanceWakeIntervalUs = 1800000000ULL;
@@ -236,6 +239,7 @@ void setup() {
 
 void loop() {
   checkBattery();
+  if (WiFi.getMode() != WIFI_OFF) disconnectWifi();
 
   bool gotReading = false;
   int eventsProcessedThisLoop = 0;
@@ -294,6 +298,7 @@ void loop() {
 
   uint64_t now = esp_timer_get_time();
   bool needsHeartbeat = (now - lastHeartbeatUs >= heartBeatInterval);
+  bool needsTimeResync = (now - lastTimeSyncUs >= TIME_RESYNC_INTERVAL_US);
 
   if (!gotReading) {
     consecutiveMissedReadings++;
@@ -303,7 +308,7 @@ void loop() {
   }
 
   if (postureChanged || needsHeartbeat) {
-    if (!timeSynced) syncTime();
+    if (!timeSynced || needsTimeResync) syncTime();
     String ts = isoTimestamp();
 
     currentDto.rawReading.timestamp = ts;
@@ -399,6 +404,7 @@ void syncTime() {
     time(&now);
     if (now > 100000) {
       timeSynced = true;
+      lastTimeSyncUs = esp_timer_get_time();
       return;
     }
     delay(500);
