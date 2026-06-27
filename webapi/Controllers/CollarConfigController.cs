@@ -17,11 +17,13 @@ public class CollarConfigController(IMongoDatabase db, NtfyService ntfy) : Contr
             await _configs.InsertOneAsync(config);
         }
 
+        /*
         await ntfy.NotifyAsync(
             horseId,
             AlarmState.None,
             "Get Config"
         );
+        */
 
         return Ok(config);
     }

@@ -25,11 +25,13 @@ public class DeviceStatusController(IMongoDatabase db, HorseService horseService
         status.HorseId = horseId;
         await _status.InsertOneAsync(status);
 
+        /*
         await ntfy.NotifyAsync(
             horseId,
             AlarmState.None,
             "Create Status"
         );
+        */
         return Created();
     }
 }

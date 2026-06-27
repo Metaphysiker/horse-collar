@@ -309,7 +309,16 @@ void loop() {
     currentDto.normalizedReading.timestamp = ts;
     currentDto.posture = (posture == LYING ? "lying" : "standing");
 
-    connectWifi();
+
+    if (!ensureWifi()) {
+      LOG("No WiFi — skipping transmission\n");
+      // Don't clear postureChanged — retry next cycle
+      // Still update lastHeartbeatUs to avoid hammering WiFi every 1.5s
+      if (needsHeartbeat) lastHeartbeatUs = now;
+      LOG_FLUSH();
+      esp_light_sleep_start();
+      return;
+    }
 
     if (needsHeartbeat && gotReading) {
       if (!sendReading(currentDto)) {
