@@ -7,6 +7,7 @@ public class CronjobController(IMongoDatabase db, NtfyService ntfy) : Controller
 {
     private readonly IMongoCollection<DeviceStatus> _status = db.GetCollection<DeviceStatus>("deviceStatus");
     private readonly IMongoCollection<SensorReadingV2> _readings = db.GetCollection<SensorReadingV2>("sensorReadingsV2");
+    private readonly IMongoCollection<CollarConfig> _configs = db.GetCollection<CollarConfig>("collarConfigs");
 
     private const int HeartbeatOverdueMinutes = 5;
     private const int LyingTooLongMinutes = 5;
@@ -28,6 +29,13 @@ public class CronjobController(IMongoDatabase db, NtfyService ntfy) : Controller
 
         foreach (var item in overdue)
         {
+            var config = await _configs.Find(c => c.HorseId == item.HorseId).FirstOrDefaultAsync();
+            if (config is not null &&
+                string.Equals(config.PowerMode, "maintenance", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             await ntfy.NotifyAsync(
                 item.HorseId,
                 AlarmState.Alert,
