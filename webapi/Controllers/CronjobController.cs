@@ -17,7 +17,9 @@ public class CronjobController(IMongoDatabase db, NtfyService ntfy) : Controller
     [HttpPost("check-heartbeat")]
     public async Task<IActionResult> CheckHeartbeat()
     {
-        var cutoff = DateTime.UtcNow.AddMinutes(-HeartbeatOverdueMinutes);
+        const int HeartbeatGraceSeconds = 30;
+
+        var cutoff = DateTime.UtcNow.AddMinutes(-HeartbeatOverdueMinutes).AddSeconds(HeartbeatGraceSeconds);
 
         var allLatest = await _status
             .Aggregate()
