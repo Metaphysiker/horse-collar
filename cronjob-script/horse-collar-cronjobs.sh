@@ -37,3 +37,4 @@ call_job() {
 
 call_job "check-heartbeat" "$BASE_URL/check-heartbeat"
 call_job "check-posture"   "$BASE_URL/check-posture"
+call_job "notify-active-alarms" "$BASE_URL/notify-active-alarms"

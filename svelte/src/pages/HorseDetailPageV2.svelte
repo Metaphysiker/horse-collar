@@ -9,6 +9,7 @@
   import SensorReadingRow from '../components/SensorReadingRow.svelte';
   import HorseHeadViewer from '../components/HorseHeadViewer.svelte';
   import { formatDate, formatDateOnly } from '../utils/formatDate.js';
+  import { alarms } from '../services/alarms.js';
 
   let { params = {} } = $props();
 
@@ -136,6 +137,18 @@
     await sensorReadingsV2.delete(params.id, id);
     readings = readings.filter(r => r.id !== id);
   }
+
+  async function clearAllAlarms() {
+  if (!confirm('Clear ALL active alarms for this horse?')) return;
+
+  try {
+    const result = await alarms.clearAll();
+    alert(`Cleared ${result.cleared ?? 0} alarms`);
+  } catch (e) {
+    console.error(e);
+    alert('Failed to clear alarms');
+  }
+}
 </script>
 
 <main>
@@ -164,6 +177,11 @@
       {:else}
         <span class="no-device">Noch keine Gerätedaten verfügbar</span>
       {/if}
+    </div>
+    <div class="alarm-actions">
+      <button class="danger-btn" onclick={clearAllAlarms}>
+        Clear all alarms
+      </button>
     </div>
   {/if}
 
@@ -361,4 +379,26 @@
   .modal-slider { padding: 0.6rem 1rem 0.8rem; background: #1e293b; display: flex; flex-direction: column; gap: 0.4rem; }
   .modal-slider label { font-size: 0.8rem; color: #94a3b8; font-family: monospace; }
   .modal-slider input[type=range] { width: 100%; accent-color: #0ea5e9; }
+
+  .alarm-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
+.danger-btn {
+  background: #dc2626;
+  color: white;
+  border: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin: 0;
+}
+
+.danger-btn:hover {
+  background: #b91c1c;
+}
 </style>
