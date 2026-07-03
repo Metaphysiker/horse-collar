@@ -29,43 +29,68 @@ public class CronjobController : ControllerBase
     [HttpPost("check-heartbeat")]
     public async Task<IActionResult> CheckHeartbeat()
     {
-        const int HeartbeatGraceSeconds = 30;
+        var now = DateTime.UtcNow;
+        var threshold = TimeSpan.FromMinutes(HeartbeatOverdueMinutes);
+        var grace = TimeSpan.FromSeconds(30);
 
-        var cutoff = DateTime.UtcNow.AddMinutes(-HeartbeatOverdueMinutes).AddSeconds(HeartbeatGraceSeconds);
-
-        var allLatest = await _status
-            .Aggregate()
-            .SortByDescending(s => s.Timestamp)
-            .Group(s => s.HorseId, g => new { HorseId = g.Key, Latest = g.First() })
+        // Get distinct horse IDs only (cheap operation)
+        var horseIds = await _status
+            .Distinct<string>("HorseId", Builders<DeviceStatus>.Filter.Empty)
             .ToListAsync();
 
-        var overdue = allLatest.Where(x => x.Latest.Timestamp < cutoff).ToList();
+        var overdueHorses = new List<string>();
 
-        foreach (var item in overdue)
+        foreach (var horseId in horseIds)
         {
-            var config = await _configs.Find(c => c.HorseId == item.HorseId).FirstOrDefaultAsync();
-            if (config is not null &&
+            // Fetch only latest record per horse (indexed sort = fast)
+            var latest = await _status
+                .Find(x => x.HorseId == horseId)
+                .SortByDescending(x => x.Timestamp)
+                .FirstOrDefaultAsync();
+
+            if (latest == null)
+                continue;
+
+            var age = now - latest.Timestamp;
+
+            if (age <= threshold + grace)
+                continue;
+
+            // Skip maintenance mode
+            var config = await _configs
+                .Find(c => c.HorseId == horseId)
+                .FirstOrDefaultAsync();
+
+            if (config != null &&
                 string.Equals(config.PowerMode, "maintenance", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
-            await _alarmService.RaiseAlarmAsync(item.HorseId, AlarmType.Heartbeat, $"No heartbeat received for over {HeartbeatOverdueMinutes} minutes.");
 
-            /*
-            await _ntfy.NotifyAsync(
-                item.HorseId,
-                AlarmState.Alert,
-                $"No heartbeat received for over {HeartbeatOverdueMinutes} minutes."
+            // 🔒 IMPORTANT: prevent alarm spam (deduplication)
+            var existingAlarm = await _alarmService.GetActiveAlarmAsync(
+                horseId,
+                AlarmType.Heartbeat
             );
-            */
+
+            if (existingAlarm == null)
+            {
+                await _alarmService.RaiseAlarmAsync(
+                    horseId,
+                    AlarmType.Heartbeat,
+                    $"No heartbeat received for over {HeartbeatOverdueMinutes} minutes."
+                );
+            }
+
+            overdueHorses.Add(horseId);
         }
 
-        var result = new
+        return Ok(new
         {
-            CheckedCount = allLatest.Count
-        };
-
-        return Ok(result);
+            CheckedHorses = horseIds.Count,
+            Overdue = overdueHorses.Count,
+            OverdueHorses = overdueHorses
+        });
     }
 
     [HttpPost("check-posture")]

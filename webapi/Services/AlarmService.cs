@@ -68,4 +68,13 @@ public class AlarmService
     {
         return await _alarms.UpdateManyAsync(filter, update);
     }
+
+    public async Task<Alarm?> GetActiveAlarmAsync(string horseId, AlarmType type)
+    {
+        return await _alarms
+        .Find(a => a.HorseId == horseId &&
+                a.Type == type &&
+                a.IsActive)
+        .FirstOrDefaultAsync();
+    }
 }
