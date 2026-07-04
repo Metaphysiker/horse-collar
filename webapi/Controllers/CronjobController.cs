@@ -168,7 +168,10 @@ public class CronjobController : ControllerBase
             string rollingPosture;
 
             if (recentReadings.Count == 0)
+            {
+                results.Add(new { horseId, changes = 0, lastPosture = (string?)null });
                 continue;
+            }
 
             rollingPosture = PostureDetector.DetectPostureV3(
                 recentReadings[0].Qw,
@@ -215,13 +218,7 @@ public class CronjobController : ControllerBase
             {
                 horseId,
                 changes,
-                lastPosture = lastReading is null ? null :
-                PostureDetector.DetectPostureV3(
-                    lastReading.Qw, lastReading.Qx, lastReading.Qy, lastReading.Qz,
-                    currentPosture: "standing",
-                    rollEnterDeg: 75f,
-                    rollExitDeg: 60f
-                )
+                lastPosture
             });
         }
 
