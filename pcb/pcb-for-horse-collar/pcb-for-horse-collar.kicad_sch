@@ -6065,7 +6065,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 156.21 33.528 90)
 			(hide yes)
 			(show_name no)
@@ -6318,7 +6318,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 69.342 163.83 90)
 			(hide yes)
 			(show_name no)
@@ -6793,7 +6793,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 165.862 129.54 90)
 			(hide yes)
 			(show_name no)
@@ -6873,7 +6873,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
 			(at 31.75 37.1348 0)
 			(hide yes)
 			(show_name no)
@@ -7343,7 +7343,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 156.21 46.228 90)
 			(hide yes)
 			(show_name no)
@@ -7423,7 +7423,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
 			(at 251.46 52.3748 0)
 			(hide yes)
 			(show_name no)
@@ -7505,7 +7505,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
 			(at 131.7752 189.23 0)
 			(hide yes)
 			(show_name no)
@@ -7663,7 +7663,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "LED_SMD:LED_0805_2012Metric"
 			(at 74.93 156.21 0)
 			(hide yes)
 			(show_name no)
@@ -7835,7 +7835,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
 			(at 106.3752 184.15 0)
 			(hide yes)
 			(show_name no)
@@ -7995,7 +7995,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 21.082 153.67 90)
 			(hide yes)
 			(show_name no)
@@ -8075,7 +8075,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Connector_USB:USB_C_Plug_ShenzhenJingTuoJin_918-118A2021Y40002_Vertical"
 			(at 132.08 135.89 0)
 			(hide yes)
 			(show_name no)
@@ -8190,7 +8190,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
 			(at 160.9852 185.42 0)
 			(hide yes)
 			(show_name no)
@@ -8382,7 +8382,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
 			(at 206.7052 78.74 0)
 			(hide yes)
 			(show_name no)
@@ -8698,7 +8698,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Connector_PinSocket_2.54mm:PinSocket_1x02_P2.54mm_Vertical"
 			(at 36.83 182.88 0)
 			(hide yes)
 			(show_name no)
@@ -8778,7 +8778,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 29.21 22.098 90)
 			(hide yes)
 			(show_name no)
@@ -9177,7 +9177,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 111.76 61.468 90)
 			(hide yes)
 			(show_name no)
@@ -9336,7 +9336,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 111.76 33.528 90)
 			(hide yes)
 			(show_name no)
