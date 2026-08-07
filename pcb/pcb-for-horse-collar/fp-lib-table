@@ -1,0 +1,4 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "BNO085") (type "KiCad") (uri "C:/Users/sraes/workspace/horse-collar/kicad/libraries/BNO085") (options "") (descr ""))
+)
